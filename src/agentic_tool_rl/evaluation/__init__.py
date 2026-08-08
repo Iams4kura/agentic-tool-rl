@@ -42,6 +42,7 @@ from agentic_tool_rl.evaluation.metrics import (
 from agentic_tool_rl.evaluation.recompute import (
     MetricDifference,
     RecomputeResult,
+    compare_metrics,
     diff_metrics,
     recompute_metrics,
 )
@@ -76,6 +77,7 @@ __all__ = [
     "build_case_id_manifest",
     "canonical_run_signature",
     "cluster_bootstrap",
+    "compare_metrics",
     "compute_metrics",
     "diff_metrics",
     "evaluate_action_validity",

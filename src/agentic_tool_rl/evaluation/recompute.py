@@ -97,6 +97,35 @@ def diff_metrics(
     return tuple(output)
 
 
+def compare_metrics(
+    metrics: EvaluationMetrics,
+    published: Mapping[str, Any] | None = None,
+    *,
+    tolerance: float = 1e-9,
+) -> RecomputeResult:
+    """Compare already-computed metrics with an optional published payload.
+
+    Keeping comparison separate from trace loading lets callers that already
+    parsed and replayed a trace reuse the same rows instead of reading a large
+    JSONL file a second time.
+    """
+
+    if tolerance < 0:
+        raise ValueError("tolerance must be non-negative")
+    actual = metrics.to_dict()
+    differences = (
+        diff_metrics(published, actual, tolerance=tolerance)
+        if published is not None
+        else ()
+    )
+    return RecomputeResult(
+        matches=not differences,
+        tolerance=tolerance,
+        differences=differences,
+        metrics=metrics,
+    )
+
+
 def recompute_metrics(
     trace_path: str | Path,
     *,
@@ -139,14 +168,7 @@ def recompute_metrics(
         bootstrap_seed=effective_seed if effective_seed is not None else 20260808,
         confidence=effective_confidence if effective_confidence is not None else 0.95,
     )
-    actual = metrics.to_dict()
-    differences = diff_metrics(published, actual, tolerance=tolerance) if published else ()
-    result = RecomputeResult(
-        matches=not differences,
-        tolerance=tolerance,
-        differences=differences,
-        metrics=metrics,
-    )
+    result = compare_metrics(metrics, published, tolerance=tolerance)
     if output_path is not None:
         write_json_atomic(output_path, result.to_dict())
     return result

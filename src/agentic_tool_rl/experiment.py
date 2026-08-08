@@ -46,6 +46,7 @@ from agentic_tool_rl.evaluation import (
     RunInputHashes,
     assert_exact_case_ids,
     build_case_id_manifest,
+    compare_metrics,
     compute_metrics,
     evaluate_action_validity,
     file_sha256,
@@ -1145,6 +1146,19 @@ def _verify_checkpoint_policy_trace(
     )
 
 
+def _claim_metric_projection(trace: Mapping[str, Any]) -> dict[str, Any]:
+    """Retain only fields needed for the three aggregate claim metrics."""
+
+    return {
+        "case_id": trace["case_id"],
+        "family": trace["family"],
+        "success": trace["success"],
+        "optimal_steps": trace["optimal_steps"],
+        "step_count": trace["step_count"],
+        "simulated_latency_s": trace["simulated_latency_s"],
+    }
+
+
 def verify_experiment_manifest(path: str | Path) -> dict[str, Any]:
     """Fail closed unless every declared run is rooted in replayable evidence."""
 
@@ -1347,7 +1361,17 @@ def verify_experiment_manifest(path: str | Path) -> dict[str, Any]:
     shared_models: dict[int, tuple[torch.nn.Module, str, str, Mapping[str, Any], str]] = {}
     observed_units = 0
     checked: list[dict[str, Any]] = []
-    verified_trace_rows: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    verified_case_ids: dict[tuple[str, int], tuple[str, ...]] = {}
+    verified_successes: dict[tuple[str, int], dict[str, bool]] = {}
+    comparison = ablation.canonical_comparison
+    comparison_names = (
+        comparison.total_system_baseline_variant,
+        comparison.matched_baseline_variant,
+        comparison.treatment_variant,
+    )
+    comparison_metric_rows: dict[str, list[dict[str, Any]]] = {
+        name: [] for name in comparison_names
+    }
     training_keys = {
         "schema_version",
         "variant",
@@ -1535,7 +1559,6 @@ def verify_experiment_manifest(path: str | Path) -> dict[str, Any]:
             )
         )
         trace_rows = read_jsonl(trace_path)
-        verified_trace_rows[(variant, seed)] = trace_rows
         assert_exact_case_ids(
             expected_case_ids, (str(row.get("case_id", "")) for row in trace_rows)
         )
@@ -1552,9 +1575,29 @@ def verify_experiment_manifest(path: str | Path) -> dict[str, Any]:
                 variant=variant_config,
             )
 
-        recomputed = recompute_metrics(
-            trace_path, published_metrics_path=metrics_path, tolerance=1e-9
+        if claim_mode == "canonical":
+            verified_case_ids[(variant, seed)] = tuple(
+                str(row["case_id"]) for row in trace_rows
+            )
+            verified_successes[(variant, seed)] = {
+                str(row["case_id"]): bool(row["success"]) for row in trace_rows
+            }
+            if variant in comparison_metric_rows:
+                comparison_metric_rows[variant].extend(
+                    _claim_metric_projection(row) for row in trace_rows
+                )
+
+        published_metrics = _read_json_object(
+            metrics_path, description="published run metrics"
         )
+        recomputed_metrics = compute_metrics(
+            trace_rows,
+            timeout_s=config.evaluation.timeout_s,
+            bootstrap_samples=config.evaluation.bootstrap_samples,
+            bootstrap_seed=config.evaluation.bootstrap_seed + seed,
+            confidence=config.evaluation.confidence,
+        )
+        recomputed = compare_metrics(recomputed_metrics, published_metrics, tolerance=1e-9)
         if not recomputed.matches:
             raise RuntimeError(f"metric mismatch in {trace_path}")
         if (
@@ -1598,17 +1641,8 @@ def verify_experiment_manifest(path: str | Path) -> dict[str, Any]:
         )
         if declared_claim_path != claim_path.resolve():
             raise RuntimeError("canonical claim path is not rooted in the run directory")
-        comparison = ablation.canonical_comparison
-        comparison_names = (
-            comparison.total_system_baseline_variant,
-            comparison.matched_baseline_variant,
-            comparison.treatment_variant,
-        )
         all_variant_runs = {
             name: [run for run in runs if run["variant"] == name] for name in variants
-        }
-        comparison_runs = {
-            name: [run for run in runs if run["variant"] == name] for name in comparison_names
         }
         if any(len(values) != len(seeds) for values in all_variant_runs.values()):
             raise RuntimeError("canonical claim lacks paired A-F seed runs")
@@ -1619,22 +1653,14 @@ def verify_experiment_manifest(path: str | Path) -> dict[str, Any]:
             success_by_variant_seed[name] = {}
             for run in all_variant_runs[name]:
                 run_seed = int(run["seed"])
-                rows = verified_trace_rows[(name, run_seed)]
-                case_ids_by_variant_seed[name][run_seed] = tuple(
-                    str(row["case_id"]) for row in rows
-                )
-                success_by_variant_seed[name][run_seed] = {
-                    str(row["case_id"]): bool(row["success"]) for row in rows
-                }
+                case_ids_by_variant_seed[name][run_seed] = verified_case_ids[(name, run_seed)]
+                success_by_variant_seed[name][run_seed] = verified_successes[(name, run_seed)]
 
         summaries: dict[str, dict[str, float | None]] = {}
         for name in comparison_names:
-            combined_rows = [
-                row
-                for run in comparison_runs[name]
-                for row in verified_trace_rows[(name, int(run["seed"]))]
-            ]
-            aggregate = compute_metrics(combined_rows, timeout_s=config.evaluation.timeout_s)
+            aggregate = compute_metrics(
+                comparison_metric_rows[name], timeout_s=config.evaluation.timeout_s
+            )
             summaries[name] = {
                 "tsr": aggregate.tsr,
                 "successful_conditional_simulated_service_time_s": (
