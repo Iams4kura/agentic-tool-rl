@@ -804,6 +804,26 @@ def test_smoke_runs_real_lightweight_loop_and_verify_run_accepts_it(
     full_directory = _experiment_artifact_path(
         experiment, run_by_variant["E-PPO-Progress-Mask"]["directory"]
     )
+    training_path = full_directory / "training.json"
+    expected_training = training_path.read_bytes()
+    training_path.unlink()
+    resumed = RUNNER.invoke(
+        app,
+        [
+            "smoke",
+            "--config",
+            str(config),
+            "--ablation",
+            str(PROJECT_ROOT / "configs/ablation.yaml"),
+            "--benchmark-dir",
+            str(benchmark_dir),
+            "--output",
+            str(output_dir),
+        ],
+    )
+    assert resumed.exit_code == 0, resumed.output
+    assert training_path.read_bytes() == expected_training
+
     integrity_path = full_directory / "run-integrity.json"
     original = integrity_path.read_bytes()
     try:
@@ -815,7 +835,6 @@ def test_smoke_runs_real_lightweight_loop_and_verify_run_accepts_it(
     finally:
         integrity_path.write_bytes(original)
 
-    training_path = full_directory / "training.json"
     original = training_path.read_bytes()
     try:
         forged = json.loads(original)

@@ -454,7 +454,11 @@ def run_experiment_matrix(
         shared_dir.mkdir(parents=True, exist_ok=True)
         shared_checkpoint = shared_dir / "bc-checkpoint.pt"
         if shared_checkpoint.exists():
-            bc_model, estimator, encoder, shared_metadata = load_checkpoint(shared_checkpoint)
+            bc_model, estimator, encoder, shared_metadata = load_checkpoint(
+                shared_checkpoint,
+                expected_variant="shared-bc",
+                expected_seed=seed,
+            )
             bc_payload = shared_metadata.get("bc")
             progress_payload = shared_metadata.get("progress")
             if not isinstance(bc_payload, dict) or not isinstance(progress_payload, dict):
@@ -492,20 +496,28 @@ def run_experiment_matrix(
             variant_dir.mkdir(parents=True, exist_ok=True)
             checkpoint = variant_dir / "checkpoint.pt"
             training_path = variant_dir / "training.json"
-            if checkpoint.exists() != training_path.exists():
+            if training_path.exists() and not checkpoint.exists():
                 raise RuntimeError(f"partial training artifacts for {variant.name}/seed-{seed}")
             if checkpoint.exists():
                 model, variant_estimator, loaded_encoder, checkpoint_metadata = load_checkpoint(
-                    checkpoint
+                    checkpoint,
+                    expected_variant=variant.name,
+                    expected_seed=seed,
                 )
                 if loaded_encoder.fingerprint() != encoder.fingerprint():
                     raise RuntimeError("cached variant feature encoder differs from shared BC")
                 estimator = variant_estimator
-                training_payload = json.loads(training_path.read_text(encoding="utf-8"))
-                if not isinstance(training_payload, dict):
-                    raise RuntimeError("training evidence must be a JSON object")
-                if checkpoint_metadata != training_payload:
-                    raise RuntimeError("cached checkpoint metadata differs from training evidence")
+                restore_training_evidence = not training_path.exists()
+                if restore_training_evidence:
+                    training_payload = checkpoint_metadata
+                else:
+                    training_payload = json.loads(training_path.read_text(encoding="utf-8"))
+                    if not isinstance(training_payload, dict):
+                        raise RuntimeError("training evidence must be a JSON object")
+                    if checkpoint_metadata != training_payload:
+                        raise RuntimeError(
+                            "cached checkpoint metadata differs from training evidence"
+                        )
                 if training_payload.get("variant") != variant.model_dump(mode="json"):
                     raise RuntimeError("cached training evidence has a different variant config")
                 if int(training_payload.get("seed", -1)) != seed:
@@ -531,6 +543,8 @@ def run_experiment_matrix(
                         raise RuntimeError("cached BC variant contains PPO updates or drift")
                 elif ppo_updates <= 0 or parameter_l2_delta <= 0.0:
                     raise RuntimeError("cached PPO variant has no real update evidence")
+                if restore_training_evidence:
+                    write_json_atomic(training_path, training_payload)
             else:
                 ppo_metrics = None
                 rollout_steps = 0
@@ -1393,7 +1407,9 @@ def verify_experiment_manifest(path: str | Path) -> dict[str, Any]:
             shared_path = root / "shared" / f"seed-{seed}" / "bc-checkpoint.pt"
             shared_hash = file_sha256(shared_path)
             loaded_shared_model, _, shared_encoder, loaded_shared_metadata = load_checkpoint(
-                shared_path
+                shared_path,
+                expected_variant="shared-bc",
+                expected_seed=seed,
             )
             shared_raw = _checkpoint_payload(shared_path)
             if shared_raw.get("seed") != seed or shared_raw.get("variant") != "shared-bc":
@@ -1426,7 +1442,11 @@ def verify_experiment_manifest(path: str | Path) -> dict[str, Any]:
             checkpoint_estimator,
             checkpoint_encoder,
             checkpoint_metadata,
-        ) = load_checkpoint(checkpoint_path)
+        ) = load_checkpoint(
+            checkpoint_path,
+            expected_variant=variant,
+            expected_seed=seed,
+        )
         checkpoint_raw = _checkpoint_payload(checkpoint_path)
         if checkpoint_raw.get("seed") != seed or checkpoint_raw.get("variant") != variant:
             raise RuntimeError(f"checkpoint identity mismatch in {checkpoint_path}")

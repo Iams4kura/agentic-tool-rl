@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
+import pytest
 import torch
 
 from agentic_tool_rl.config import ExperimentConfig, load_config
 from agentic_tool_rl.envs import generate_tasks
 from agentic_tool_rl.features import FeatureEncoder
-from agentic_tool_rl.models import ProgressEstimator
+from agentic_tool_rl.models import ActorCritic, ProgressEstimator
 from agentic_tool_rl.training import (
     collect_expert_demonstrations,
     load_checkpoint,
@@ -85,6 +87,48 @@ def test_progress_training_and_masked_episode_is_auditable(tmp_path: Path) -> No
     assert metadata["bc_loss"] == bc_metrics.loss
     for expected, actual in zip(model.parameters(), restored.parameters(), strict=True):
         assert torch.equal(expected, actual)
+
+    with pytest.raises(ValueError, match="seed identity mismatch"):
+        load_checkpoint(checkpoint, expected_seed=8)
+    with pytest.raises(ValueError, match="variant identity mismatch"):
+        load_checkpoint(checkpoint, expected_variant="B-BC-Mask")
+
+
+def test_checkpoint_save_is_atomic_on_serialization_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    encoder = FeatureEncoder(16, 16)
+    model = ActorCritic(16, 16, 16)
+    estimator = ProgressEstimator(16)
+    checkpoint = save_checkpoint(
+        tmp_path / "policy.pt",
+        model,
+        estimator,
+        encoder,
+        seed=7,
+        variant="test",
+        metadata={},
+    )
+    original = checkpoint.read_bytes()
+
+    def fail_after_partial_write(_payload: object, handle: Any) -> None:
+        handle.write(b"partial")
+        raise RuntimeError("simulated serialization failure")
+
+    monkeypatch.setattr(torch, "save", fail_after_partial_write)
+    with pytest.raises(RuntimeError, match="simulated serialization failure"):
+        save_checkpoint(
+            checkpoint,
+            model,
+            estimator,
+            encoder,
+            seed=7,
+            variant="test",
+            metadata={},
+        )
+
+    assert checkpoint.read_bytes() == original
+    assert not list(tmp_path.glob(".policy.pt.*.tmp"))
 
 
 def test_random_progress_estimator_is_not_required_for_sparse_episode() -> None:
