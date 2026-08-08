@@ -12,7 +12,7 @@ configs/cpu_full.yaml：
 | dev | 200 | Progress 校准与开发期 floor/ceiling 检查 |
 | test | 1000 | 一次性策略评测与动作有效性来源 |
 
-canonical base seed 在预注册提交后按[锁定协议](protocol/preregistration-v1.3.md#4-final-seed-的一次性派生)一次性派生，并以 configs/cpu_full.yaml 与锁定表为准；split 使用独立 offset，case、entity 和 task seed 互不重叠。完整评测使用 5 个预注册训练 seed 和 1000 次 bootstrap。smoke 使用独立的固定开发 seed、32/12/32、一个训练 seed 和 50 次 bootstrap，只验证 B-BC-Mask / E-PPO-Progress-Mask 工程闭环。
+canonical base seed 已按[锁定协议](protocol/preregistration-v1.3.md#4-final-seed-的一次性派生)由预注册提交唯一派生为 `2006549735`，并与 configs/cpu_full.yaml 及锁定表一致；split 使用独立 offset，case、entity 和 task seed 互不重叠。完整评测使用 5 个预注册训练 seed 和 1000 次 bootstrap。smoke 使用独立的固定开发 seed、32/12/32、一个训练 seed 和 50 次 bootstrap，只验证 B-BC-Mask / E-PPO-Progress-Mask 工程闭环。
 
 ## 2. 十个业务族与长度
 

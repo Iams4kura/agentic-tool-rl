@@ -9,7 +9,7 @@ benchmark:
   families: 10
   min_steps: 6
   max_steps: 15
-  seed: 20260808
+  seed: 2006549735
 
 policy:
   backend: lightweight
