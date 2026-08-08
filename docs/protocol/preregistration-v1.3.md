@@ -83,6 +83,6 @@ Primary E-vs-B TSR 差值严格按相同 `(seed, case_id)` 配对，并同时对
 | Preregistration commit `P` | `356c8b55b0f088dc613ecf00a8d832ca311076ff` |
 | `SHA256(UTF8(P))` | `779984e70092cc1fbf48dd6f67c1c064dabba5b75b963795f3a747582d880cdf` |
 | Derived final seed | `int(0x779984e7) = 2006549735` |
-| Seed-lock commit | 待生成 |
+| Seed-lock commit | `46cd948b39981f8a9ef6a8283fc7f2ece2d3ce40` |
 | Canonical run ID | 待运行 |
 | Final report | 待运行 |
