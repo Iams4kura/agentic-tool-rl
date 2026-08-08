@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this project, please cite the repository."
+title: "Agentic Tool RL"
+type: software
+authors:
+  - family-names: "Iams4kura"
+repository-code: "https://github.com/Iams4kura/agentic-tool-rl"
+license: MIT
+version: 0.1.0
+date-released: 2026-08-08

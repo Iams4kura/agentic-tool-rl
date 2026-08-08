@@ -1,0 +1,16 @@
+.DS_Store
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Generated experiment outputs. Curated acceptance summaries remain committed
+# under docs/results/ so a clone stays small while raw CI artifacts remain downloadable.
+artifacts/
+docs/idea-to-deliverable/*/e2e/evidence/*/
+!docs/idea-to-deliverable/*/e2e/evidence/.gitkeep

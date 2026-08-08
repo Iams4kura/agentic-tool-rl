@@ -1,0 +1,24 @@
+{
+  "archive_sha256": "aff8b3ca7240a41a109e4ee598e0a96e45fcb92e7b8395ac19cb3748cd260d89",
+  "dataset": "Microsoft Azure Functions Trace 2019",
+  "derivation": {
+    "filter": "finite Average >= 0 and Count > 0",
+    "invocations": 12481740344,
+    "rows": 662922,
+    "weight": "Count"
+  },
+  "license": "CC-BY-4.0",
+  "profile_id": "azure-functions-2019-invocation-weighted-v1",
+  "seconds": {
+    "idempotent_replay_p50": 0.14,
+    "invalid_validation_p75": 0.334,
+    "mutating_p85": 1.592,
+    "mutating_p87_5": 1.633,
+    "mutating_p90": 1.658,
+    "mutating_p92_5": 1.686,
+    "mutating_p95": 1.734,
+    "read_only_query_p80": 0.902
+  },
+  "source": "https://github.com/Azure/AzurePublicDataset/releases/download/dataset-functions-2019/azurefunctions_dataset2019_azurefunctions-dataset2019.tar.xz",
+  "source_documentation": "https://github.com/Azure/AzurePublicDataset/blob/master/AzureFunctionsDataset2019.md"
+}

@@ -1,0 +1,41 @@
+name: Full benchmark
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-cpu-benchmark:
+    name: Six variants x five seeds x 1,000 test cases
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv and select Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: "3.11"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Sync locked dependencies
+        run: uv sync --extra dev --frozen
+
+      - name: Run reproducible full benchmark
+        run: make benchmark
+
+      - name: Upload benchmark inputs, traces, metrics, and manifests
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: full-benchmark-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            artifacts/benchmark-v1
+            artifacts/runs/full
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentic-tool-rl"
+version = "0.1.0"
+description = "Reproducible action-level PPO for long-horizon structured tool-calling agents"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "MIT" }
+authors = [{ name = "Iams4kura" }]
+keywords = ["agentic-rl", "ppo", "tool-calling", "action-mask", "qwen"]
+dependencies = [
+  "numpy>=1.26,<3",
+  "pydantic>=2.8,<3",
+  "pyyaml>=6.0,<7",
+  "torch>=2.3,<3",
+  "typer>=0.12,<1",
+]
+
+[project.optional-dependencies]
+qwen = [
+  "accelerate>=1.0,<2",
+  "peft>=0.14,<1",
+  "transformers>=4.48,<5",
+]
+dev = [
+  "mypy>=1.13,<2",
+  "pytest>=8.3,<9",
+  "pytest-cov>=6,<8",
+  "ruff>=0.9,<1",
+]
+
+[project.scripts]
+agentic-tool-rl = "agentic_tool_rl.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentic_tool_rl"]
+
+[tool.pytest.ini_options]
+addopts = '-ra --strict-markers -m "not qwen"'
+testpaths = ["tests"]
+markers = [
+  "qwen: optional Qwen adapter and GPU-configuration contract tests",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["agentic_tool_rl"]

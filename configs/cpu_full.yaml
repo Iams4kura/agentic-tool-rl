@@ -1,0 +1,50 @@
+kind: experiment
+name: cpu-full
+
+benchmark:
+  generator_version: benchmark-v1.3.0
+  train_cases: 2000
+  dev_cases: 200
+  test_cases: 1000
+  families: 10
+  min_steps: 6
+  max_steps: 15
+  seed: 20260808
+
+policy:
+  backend: lightweight
+  observation_dim: 64
+  action_dim: 64
+  hidden_dim: 96
+
+training:
+  behavior_cloning:
+    epochs: 2
+    batch_size: 256
+    learning_rate: 0.0015
+  ppo:
+    iterations: 8
+    epochs: 4
+    rollout_episodes: 128
+    minibatch_size: 512
+    learning_rate: 0.0003
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_ratio: 0.2
+    value_coefficient: 0.5
+    entropy_coefficient: 0.01
+    max_grad_norm: 0.5
+
+reward:
+  task_success: 1.0
+  task_failure: -1.0
+  invalid_action: -0.2
+  forbidden_side_effect: -1.0
+  step_cost: -0.01
+  progress_beta: 0.35
+
+evaluation:
+  timeout_s: 80.0
+  bootstrap_samples: 1000
+  bootstrap_seed: 20260808
+  confidence: 0.95
