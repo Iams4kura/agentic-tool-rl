@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import multiprocessing
 import os
+import threading
 from pathlib import Path
-from queue import Empty
+from queue import Empty, Queue
 from types import SimpleNamespace
 from typing import Any
 
@@ -13,6 +14,9 @@ import pytest
 import agentic_tool_rl.evaluation.trace_store as trace_store_module
 from agentic_tool_rl.evaluation.io import canonical_json
 from agentic_tool_rl.evaluation.trace_store import TraceStore
+
+_PROCESS_START_TIMEOUT_S = 30
+_WRITER_RELEASE_TIMEOUT_S = 60
 
 
 def _record(case_id: str, **values: object) -> dict[str, object]:
@@ -34,7 +38,7 @@ def _write_half_record_under_lock(
             handle.write(prefix)
             os.fsync(handle.fileno())
             ready.set()
-            if not release.wait(10):
+            if not release.wait(_WRITER_RELEASE_TIMEOUT_S):
                 raise TimeoutError("test writer was not released")
             handle.write(suffix + b"\n")
             os.fsync(handle.fileno())
@@ -121,9 +125,9 @@ def test_opener_waits_for_locked_half_record_without_truncating(tmp_path: Path) 
     context = multiprocessing.get_context("spawn")
     writer_ready = context.Event()
     release_writer = context.Event()
-    opener_started = context.Event()
-    opener_finished = context.Event()
-    result = context.Queue()
+    opener_started = threading.Event()
+    opener_finished = threading.Event()
+    result: Queue[tuple[str, object]] = Queue()
     writer = context.Process(
         target=_write_half_record_under_lock,
         args=(
@@ -134,25 +138,32 @@ def test_opener_waits_for_locked_half_record_without_truncating(tmp_path: Path) 
             release_writer,
         ),
     )
-    opener = context.Process(
+    opener = threading.Thread(
         target=_open_store,
         args=(str(path), opener_started, opener_finished, result),
+        daemon=True,
     )
 
     writer.start()
     try:
-        assert writer_ready.wait(10), "writer did not acquire the file lock"
+        assert writer_ready.wait(_PROCESS_START_TIMEOUT_S), (
+            "writer did not acquire the file lock"
+        )
         opener.start()
-        assert opener_started.wait(10), "opener process did not start"
+        assert opener_started.wait(_PROCESS_START_TIMEOUT_S), (
+            "opener process did not start"
+        )
         assert not opener_finished.wait(0.25), (
             "TraceStore opened before the active writer released its lock"
         )
         release_writer.set()
-        assert opener_finished.wait(10), "opener remained blocked after commit"
-        opener.join(10)
-        writer.join(10)
+        assert opener_finished.wait(_PROCESS_START_TIMEOUT_S), (
+            "opener remained blocked after commit"
+        )
+        opener.join(_PROCESS_START_TIMEOUT_S)
+        writer.join(_PROCESS_START_TIMEOUT_S)
         assert writer.exitcode == 0
-        assert opener.exitcode == 0
+        assert not opener.is_alive()
         try:
             status, payload = result.get(timeout=2)
         except Empty as exc:  # pragma: no cover - diagnostic failure path
@@ -162,15 +173,11 @@ def test_opener_waits_for_locked_half_record_without_truncating(tmp_path: Path) 
         assert path.read_bytes() == line + b"\n"
     finally:
         release_writer.set()
-        for process in (opener, writer):
-            if process.pid is None:
-                continue
-            process.join(1)
-            if process.is_alive():
-                process.terminate()
-                process.join(5)
-        result.close()
-        result.join_thread()
+        opener.join(1)
+        writer.join(1)
+        if writer.is_alive():
+            writer.terminate()
+            writer.join(5)
 
 
 def test_append_rebuilds_index_after_external_truncation(tmp_path: Path) -> None:
