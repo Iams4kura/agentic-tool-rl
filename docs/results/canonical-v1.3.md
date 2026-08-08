@@ -218,11 +218,10 @@ benchmark/action_validity.metrics.json
 完整校验：
 
 ```bash
-uv run --frozen agentic-tool-rl verify-run \
-  --manifest artifacts/runs/full/886622c5cb6cffc3/run-manifest.json
+uv run --locked python scripts/verify_release.py --release v0.1.0
 ```
 
-verifier 会重新生成 benchmark 与候选、重放事务环境，并使用每个运行声明的 checkpoint 确定性重跑全部题目，逐字段核对策略轨迹、训练元数据、输入哈希、指标和 canonical claim。
+Release verifier 先校验固定 annotated tag object、peeled commit、source/runtime/toolchain、归档和逐文件摘要，再在固定 Darwin/arm64 平台、v0.1.0 tag 与 CPython 3.11.15 / Torch 2.13.0 / uv 0.11.29 环境中调用原始 verifier；其他平台会在下载证据前 fail-closed。内层 verifier 会重新生成 benchmark 与候选、重放事务环境，并使用每个运行声明的 checkpoint 确定性重跑全部题目，逐字段核对策略轨迹、训练元数据、输入哈希、指标和 canonical claim。演进后的 `main` source fingerprint 与本次发布不同，不能直接替代 v0.1.0 verifier。
 
 ## 11. 限制
 
