@@ -127,4 +127,4 @@
 - E2E-001～E2E-012 必须逐项有强证据。
 - 工程正确、canonical 结构和假设结果是三个不同状态。
 - final 假设无论支持与否都必须如实发布。
-- v1.3 final 尚未产生前，文档不得放推测跑分。
+- v1.3 final 尚未产生前，文档不得放推测跑分；现已完成的唯一正式数字入口为 [canonical final report](../../../results/canonical-v1.3.md)。

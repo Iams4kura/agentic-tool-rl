@@ -1,6 +1,6 @@
 # benchmark-v1.3.0 预注册协议
 
-状态：**协议提交与 final seed 已锁定；final holdout 尚未生成。**
+状态：**协议、final seed 与一次性 canonical run 均已锁定；结果已按预注册规则发布。**
 
 本协议的目的不是让实验命中某组简历数字，而是在读取 final holdout 之前固定研究问题、数据边界、比较方法和发布规则。`benchmark-v1.2.0` 已因 BC ceiling 被消费并降级为开发证据，详见 [pilot 停止记录](../results/pilot-v1.2.md)。
 
@@ -84,5 +84,5 @@ Primary E-vs-B TSR 差值严格按相同 `(seed, case_id)` 配对，并同时对
 | `SHA256(UTF8(P))` | `779984e70092cc1fbf48dd6f67c1c064dabba5b75b963795f3a747582d880cdf` |
 | Derived final seed | `int(0x779984e7) = 2006549735` |
 | Seed-lock commit | `46cd948b39981f8a9ef6a8283fc7f2ece2d3ce40` |
-| Canonical run ID | 待运行 |
-| Final report | 待运行 |
+| Canonical run ID | `886622c5cb6cffc3` |
+| Final report | [benchmark-v1.3 canonical final report](../results/canonical-v1.3.md) |

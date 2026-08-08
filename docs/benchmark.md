@@ -256,4 +256,4 @@ verify-run 会重生成三个 split 和动作集、校验 family×topology held-
 
 benchmark-v1.2.0 的首个 pilot 暴露 BC ceiling、ordinal operation ID、固定拓扑/候选顺序和不公平主比较，因此主动停止并将已消费 test 降级为开发证据。详情见 [pilot-v1.2 归档](results/pilot-v1.2.md)。
 
-v1.3 final 尚未产生；本文只定义协议和口径，不发布推测数字。
+v1.3 final 已完成并通过 30 runs / 30,000 evaluation units 的 checkpoint-bound verifier。实测六变体结果、配对 CI、ActionMask 全局证据与解释边界见 [canonical final report](results/canonical-v1.3.md)。

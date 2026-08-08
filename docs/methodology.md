@@ -287,9 +287,9 @@ make qwen-check
 
 该命令只在手动 workflow 或本地运行。它验证固定 Qwen revision、strict YAML、LoRA 参数、设备策略、结构化调用和 finite log-prob/value；dry-run 明确 would_download_weights=false。当前没有 GPU trainer 或 Qwen final 结果。
 
-## 15. 发布规则
+## 15. 发布规则与正式结果
 
-v1.3 final 尚未运行完前，不填写结果表。完成后：
+v1.3 final 已完成并通过内嵌及独立 canonical verifier。实际六变体、五 seed、case-cluster CI、E−B 配对 CI 与全局 ActionMask 结果见 [canonical final report](results/canonical-v1.3.md)。发布仍遵循：
 
 1. 先运行 verify-run；
 2. 报告全部六变体的五 seed 分布和 CI，不只挑最佳 seed；
@@ -298,15 +298,7 @@ v1.3 final 尚未运行完前，不填写结果表。完成后：
 5. 将全局 action-validity 表与策略变体表分开，明确 BAcc 是规则型 Mask 在 action-validity-v2 上的单次 benchmark 级结果；
 6. 无论 hypothesis_passed 为 true 或 false 都发布，不按结果修改 holdout。
 
-推荐表：
-
-| Variant | TSR + CI | Invalid action rate | Side-effect rate | Step efficiency | successful_conditional_simulated_service_time_s | timeout_penalized_simulated_cost_s | Evidence |
-|---|---:|---:|---:|---:|---:|---:|---|
-| A–F | 尚未生成 | 尚未生成 | 尚未生成 | 尚未生成 | 尚未生成 | 尚未生成 | <run-id> |
-
-| Global benchmark evidence | BAcc | Valid/invalid recall | Macro-F1 | Confusion/strata | Evidence |
-|---|---:|---:|---:|---:|---|
-| action-validity-v2 | 尚未生成 | 尚未生成 | 尚未生成 | 尚未生成 | action_validity.metrics.json |
+主比较结果为：B TSR `0.4636`，E TSR `0.5288`，E−B=`0.0652`；配对 seed×case bootstrap 95% CI 为 `[0.034195, 0.09782]`。`canonical=true`、`hypothesis_passed=true`。Run ID 为 `886622c5cb6cffc3`。
 
 ## 16. 限制
 

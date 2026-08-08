@@ -146,7 +146,9 @@ uv run python scripts/derive_azure_latency_profile.py \
 
 规则型 ActionMask 在这个合成约束集上的 BAcc 必须准确命名，不能外推为策略智能或真实业务安全能力。
 
-v1.2 暴露顺序与拓扑捷径并出现 ceiling，已停止且不作为最终结果；审计与停止理由见 [benchmark-v1.2 pilot 归档](docs/results/pilot-v1.2.md)。当前文档不包含尚未产生的 v1.3 final 数字。
+v1.2 暴露顺序与拓扑捷径并出现 ceiling，已停止且不作为最终结果；审计与停止理由见 [benchmark-v1.2 pilot 归档](docs/results/pilot-v1.2.md)。
+
+v1.3 final 已完成：在 5 seeds × 1000 frozen test cases 上，E-PPO-Progress-Mask 相对相同 Action Mask 与共享 BC 起点的 B-BC-Mask，将 TSR 从 46.36% 提升至 52.88%，绝对提升 6.52 个百分点；配对 seed×case bootstrap 95% CI 为 [3.4195, 9.7820] 个百分点，`canonical=true`、`hypothesis_passed=true`。完整六变体结果、ActionMask 全局证据与限制见 [canonical report](docs/results/canonical-v1.3.md)。
 
 ## 常用 CLI
 
