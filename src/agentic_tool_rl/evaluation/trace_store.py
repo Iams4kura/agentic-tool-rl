@@ -6,9 +6,9 @@ import hashlib
 import json
 import os
 import threading
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from agentic_tool_rl.evaluation.io import canonical_json
 
@@ -16,6 +16,8 @@ try:  # macOS/Linux locking; the project does not target Windows CI.
     import fcntl
 except ImportError:  # pragma: no cover - defensive import isolation
     fcntl = None  # type: ignore[assignment]
+
+_MAX_PATH_RETRIES = 8
 
 
 class TraceConflictError(ValueError):
@@ -36,11 +38,30 @@ class TraceStore:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.touch(exist_ok=True)
         self._thread_lock = threading.RLock()
         self._records: dict[str, dict[str, Any]] = {}
         self._checksums: dict[str, str] = {}
-        self._refresh(repair_tail=True)
+        self._valid_end = 0
+        self._inode: tuple[int, int] | None = None
+        # Tail repair must participate in the same inter-process lock as append.
+        # Otherwise, an opener could mistake another process's in-flight write
+        # for a crashed record and truncate it while that writer still owns the
+        # file lock.
+        with self._thread_lock:
+            for _ in range(_MAX_PATH_RETRIES):
+                with self.path.open("a+b") as handle:
+                    self._lock(handle)
+                    try:
+                        if not self._path_matches_handle(handle):
+                            continue
+                        self._full_refresh(handle, repair_tail=True)
+                        if not self._path_matches_handle(handle):
+                            continue
+                        break
+                    finally:
+                        self._unlock(handle)
+            else:
+                raise RuntimeError("trace store path changed repeatedly while opening")
 
     @staticmethod
     def _case_id(record: Mapping[str, Any]) -> str:
@@ -53,26 +74,61 @@ class TraceStore:
     def _checksum(payload: bytes) -> str:
         return hashlib.sha256(payload).hexdigest()
 
-    def _refresh(self, *, repair_tail: bool) -> None:
-        payload = self.path.read_bytes()
+    @staticmethod
+    def _file_identity(handle: BinaryIO) -> tuple[int, int]:
+        status = os.fstat(handle.fileno())
+        return status.st_dev, status.st_ino
+
+    def _path_matches_handle(self, handle: BinaryIO) -> bool:
+        """Return whether ``path`` still names the opened file description."""
+
+        try:
+            status = self.path.stat()
+        except OSError:
+            return False
+        return (status.st_dev, status.st_ino) == self._file_identity(handle)
+
+    @staticmethod
+    def _lock(handle: BinaryIO) -> None:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+    @staticmethod
+    def _unlock(handle: BinaryIO) -> None:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+    def _scan_from(
+        self,
+        handle: BinaryIO,
+        *,
+        start_offset: int,
+        known_case_ids: Collection[str],
+        repair_tail: bool,
+    ) -> tuple[dict[str, dict[str, Any]], dict[str, str], int]:
+        """Parse complete records from one known line boundary.
+
+        Newly parsed records stay local until the complete suffix has been
+        validated. A corrupt suffix therefore cannot leave the in-memory index
+        partially advanced and make a later retry report false duplicates.
+        """
+
         records: dict[str, dict[str, Any]] = {}
         checksums: dict[str, str] = {}
-        offset = 0
-        valid_end = 0
-        lines = payload.splitlines(keepends=True)
-        for index, raw_line in enumerate(lines):
-            is_last = index == len(lines) - 1
+        offset = start_offset
+        valid_end = start_offset
+        handle.seek(start_offset)
+        while raw_line := handle.readline():
             complete = raw_line.endswith(b"\n")
             line = raw_line.rstrip(b"\r\n")
             next_offset = offset + len(raw_line)
             # A newline is the record's commit marker. Syntactically complete
             # JSON without it can still be the result of a crashed append.
-            if is_last and not complete:
+            if not complete:
                 if repair_tail:
-                    with self.path.open("r+b") as handle:
-                        handle.truncate(valid_end)
-                        handle.flush()
-                        os.fsync(handle.fileno())
+                    handle.truncate(valid_end)
+                    handle.flush()
+                    os.fsync(handle.fileno())
                     break
                 raise CorruptTraceStoreError("trace store ends with an uncommitted record")
             if not line:
@@ -88,14 +144,49 @@ class TraceStore:
             if not isinstance(value, dict):
                 raise CorruptTraceStoreError(f"record at byte offset {offset} is not an object")
             case_id = self._case_id(value)
-            if case_id in records:
+            if case_id in known_case_ids or case_id in records:
                 raise CorruptTraceStoreError(f"duplicate case_id {case_id!r} in trace store")
             records[case_id] = value
             checksums[case_id] = self._checksum(line)
             valid_end = next_offset
             offset = next_offset
+        return records, checksums, valid_end
+
+    def _full_refresh(self, handle: BinaryIO, *, repair_tail: bool) -> None:
+        records, checksums, valid_end = self._scan_from(
+            handle,
+            start_offset=0,
+            known_case_ids=(),
+            repair_tail=repair_tail,
+        )
         self._records = records
         self._checksums = checksums
+        self._valid_end = valid_end
+        self._inode = self._file_identity(handle)
+
+    def _synchronize(self, handle: BinaryIO) -> None:
+        """Synchronize the index with bytes committed by other writers."""
+
+        identity = self._file_identity(handle)
+        size = os.fstat(handle.fileno()).st_size
+        if self._inode != identity or size < self._valid_end:
+            # Replacement and truncation invalidate every cached byte offset.
+            # Rebuilding under the exclusive lock is safe and preserves file
+            # order while still keeping the common append path incremental.
+            self._full_refresh(handle, repair_tail=True)
+            return
+        if size == self._valid_end:
+            return
+        records, checksums, valid_end = self._scan_from(
+            handle,
+            start_offset=self._valid_end,
+            known_case_ids=self._records,
+            repair_tail=True,
+        )
+        self._records.update(records)
+        self._checksums.update(checksums)
+        self._valid_end = valid_end
+        self._inode = identity
 
     def __len__(self) -> int:
         return len(self._records)
@@ -124,25 +215,39 @@ class TraceStore:
         case_id = self._case_id(normalized)
         line = canonical_json(normalized).encode("utf-8")
 
-        with self._thread_lock, self.path.open("a+b") as handle:
-            if fcntl is not None:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                self._refresh(repair_tail=True)
-                existing = self._records.get(case_id)
-                if existing is not None:
-                    if existing != normalized:
-                        raise TraceConflictError(
-                            f"case_id {case_id!r} already exists with different evidence"
-                        )
-                    return False
-                handle.seek(0, os.SEEK_END)
-                handle.write(line + b"\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-                self._records[case_id] = normalized
-                self._checksums[case_id] = self._checksum(line)
-                return True
-            finally:
-                if fcntl is not None:
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        with self._thread_lock:
+            for _ in range(_MAX_PATH_RETRIES):
+                with self.path.open("a+b") as handle:
+                    self._lock(handle)
+                    try:
+                        # A non-cooperating os.replace can race open() before
+                        # flock(). Never append to an inode no longer named by
+                        # the configured path; close it and retry the new path.
+                        if not self._path_matches_handle(handle):
+                            continue
+                        self._synchronize(handle)
+                        if not self._path_matches_handle(handle):
+                            continue
+                        existing = self._records.get(case_id)
+                        if existing is not None:
+                            if not self._path_matches_handle(handle):
+                                continue
+                            if existing != normalized:
+                                raise TraceConflictError(
+                                    f"case_id {case_id!r} already exists with different evidence"
+                                )
+                            return False
+                        handle.seek(0, os.SEEK_END)
+                        handle.write(line + b"\n")
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                        self._records[case_id] = normalized
+                        self._checksums[case_id] = self._checksum(line)
+                        self._valid_end = os.fstat(handle.fileno()).st_size
+                        self._inode = self._file_identity(handle)
+                        if not self._path_matches_handle(handle):
+                            continue
+                        return True
+                    finally:
+                        self._unlock(handle)
+        raise RuntimeError("trace store path changed repeatedly during append")

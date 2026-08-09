@@ -11,11 +11,13 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import random
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import fmean
+from tempfile import NamedTemporaryFile
 from typing import Any, Literal
 
 import torch
@@ -628,22 +630,49 @@ def save_checkpoint(
 ) -> Path:
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "schema_version": 1,
-            "seed": seed,
-            "variant": variant,
-            "state_dim": encoder.state_dim,
-            "action_dim": encoder.action_dim,
-            "hidden_dim": model.hidden_dim,
-            "feature_fingerprint": encoder.fingerprint(),
-            "model_state_dict": model.state_dict(),
-            "progress_state_dict": estimator.state_dict(),
-            "progress_hidden_dim": 64,
-            "metadata": dict(metadata),
-        },
-        destination,
-    )
+    payload = {
+        "schema_version": 1,
+        "seed": seed,
+        "variant": variant,
+        "state_dim": encoder.state_dim,
+        "action_dim": encoder.action_dim,
+        "hidden_dim": model.hidden_dim,
+        "feature_fingerprint": encoder.fingerprint(),
+        "model_state_dict": model.state_dict(),
+        "progress_state_dict": estimator.state_dict(),
+        "progress_hidden_dim": 64,
+        "metadata": dict(metadata),
+    }
+    temporary: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            torch.save(payload, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        try:
+            directory_fd = os.open(destination.parent, directory_flags)
+        except OSError:
+            directory_fd = None
+        if directory_fd is not None:
+            try:
+                os.fsync(directory_fd)
+            except OSError:
+                # Some supported filesystems do not implement directory fsync;
+                # the file remains atomically replaced and fully fsync'd.
+                pass
+            finally:
+                os.close(directory_fd)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return destination
 
 
@@ -651,6 +680,7 @@ def load_checkpoint(
     path: str | Path,
     *,
     expected_variant: str | None = None,
+    expected_seed: int | None = None,
 ) -> tuple[ActorCritic, ProgressEstimator, FeatureEncoder, dict[str, Any]]:
     payload = torch.load(path, map_location="cpu", weights_only=True)
     if not isinstance(payload, dict) or payload.get("schema_version") != 1:
@@ -662,6 +692,14 @@ def load_checkpoint(
         raise ValueError(
             "checkpoint variant identity mismatch: "
             f"expected {expected_variant!r}, observed {checkpoint_variant!r}"
+        )
+    checkpoint_seed = payload.get("seed")
+    if isinstance(checkpoint_seed, bool) or not isinstance(checkpoint_seed, int):
+        raise ValueError("checkpoint seed identity is missing")
+    if expected_seed is not None and checkpoint_seed != expected_seed:
+        raise ValueError(
+            "checkpoint seed identity mismatch: "
+            f"expected {expected_seed!r}, observed {checkpoint_seed!r}"
         )
     encoder = FeatureEncoder(
         state_dim=int(payload["state_dim"]), action_dim=int(payload["action_dim"])
@@ -691,7 +729,7 @@ def load_checkpoint(
         if (
             isinstance(metadata_seed, bool)
             or not isinstance(metadata_seed, int)
-            or payload.get("seed") != metadata_seed
+            or checkpoint_seed != metadata_seed
         ):
             raise ValueError("checkpoint seed identity differs from training metadata")
     return model, estimator, encoder, dict(metadata)

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentic-tool-rl"
-version = "0.1.0"
+version = "0.2.0.dev0"
 description = "Reproducible action-level PPO for long-horizon structured tool-calling agents"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"

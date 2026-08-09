@@ -6,36 +6,67 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: full-benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   full-cpu-benchmark:
     name: Six variants x five seeds x 1,000 test cases
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 360
 
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install uv and select Python
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          python-version: "3.11"
+          version: "0.11.29"
+          python-version: "3.11.15"
           enable-cache: true
-          cache-dependency-glob: uv.lock
+          cache-dependency-glob: |
+            uv.lock
+            build-constraints.txt
+
+      - name: Check lockfile freshness
+        run: uv lock --check
 
       - name: Sync locked dependencies
-        run: uv sync --extra dev --frozen
+        run: uv sync --extra dev --locked
 
       - name: Run reproducible full benchmark
         run: make benchmark
 
+      - name: Write benchmark artifact checksums
+        run: |
+          cd artifacts
+          find benchmark-v1 runs/full -type f -print0 \
+            | sort -z \
+            | xargs -0 sha256sum > full-benchmark-SHA256SUMS
+
       - name: Upload benchmark inputs, traces, metrics, and manifests
-        if: ${{ !cancelled() }}
+        if: ${{ success() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: full-benchmark-${{ github.run_number }}-${{ github.run_attempt }}
+          name: full-benchmark-${{ github.sha }}-${{ github.run_attempt }}
           path: |
             artifacts/benchmark-v1
             artifacts/runs/full
-          if-no-files-found: warn
+            artifacts/full-benchmark-SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload partial artifacts for failure diagnosis
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: full-benchmark-partial-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            artifacts/benchmark-v1
+            artifacts/runs/full
+          if-no-files-found: ignore
           retention-days: 14

@@ -14,6 +14,7 @@ from agentic_tool_rl.evaluation import (
     TraceSchemaError,
     TraceStore,
     cluster_bootstrap,
+    compare_metrics,
     compute_metrics,
     paired_seed_case_bootstrap_tsr_difference,
     recompute_metrics,
@@ -21,6 +22,7 @@ from agentic_tool_rl.evaluation import (
     write_json_atomic,
 )
 from agentic_tool_rl.evaluation.io import canonical_json
+from agentic_tool_rl.experiment import _claim_metric_projection
 
 
 def _traces() -> list[dict[str, object]]:
@@ -164,6 +166,43 @@ def test_metrics_json_can_be_independently_recomputed(tmp_path: Path) -> None:
     mismatch = recompute_metrics(trace_path, published_metrics_path=metrics_path)
     assert not mismatch.matches
     assert [item.path for item in mismatch.differences] == ["tsr"]
+
+
+def test_precomputed_metrics_can_be_compared_without_reloading_traces() -> None:
+    metrics = compute_metrics(_traces(), timeout_s=30.0)
+
+    assert compare_metrics(metrics, metrics.to_dict()).matches is True
+    published = metrics.to_dict()
+    published["tsr"] = 0.99
+    mismatch = compare_metrics(metrics, published)
+
+    assert mismatch.matches is False
+    assert [item.path for item in mismatch.differences] == ["tsr"]
+    assert compare_metrics(metrics, {}).matches is False
+    with pytest.raises(ValueError, match="tolerance"):
+        compare_metrics(metrics, tolerance=-1.0)
+
+
+def test_claim_projection_preserves_published_outcome_metrics() -> None:
+    traces: list[dict[str, object]] = []
+    for trace in _traces():
+        steps = trace["steps"]
+        assert isinstance(steps, list)
+        traces.append({**trace, "step_count": len(steps)})
+    full = compute_metrics(traces, timeout_s=30.0)
+    projected = compute_metrics(
+        [_claim_metric_projection(trace) for trace in traces], timeout_s=30.0
+    )
+
+    assert projected.tsr == full.tsr
+    assert (
+        projected.successful_conditional_simulated_service_time_s
+        == full.successful_conditional_simulated_service_time_s
+    )
+    assert (
+        projected.timeout_penalized_simulated_cost_s
+        == full.timeout_penalized_simulated_cost_s
+    )
 
 
 def test_paired_seed_case_bootstrap_is_deterministic_and_rejects_unpaired_data() -> None:

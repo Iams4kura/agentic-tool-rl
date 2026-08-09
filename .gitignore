@@ -3,11 +3,19 @@
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 __pycache__/
 *.py[cod]
 *.egg-info/
 build/
 dist/
+
+# Local credentials must never enter a source distribution.
+.env
+.env.*
+!.env.example
 
 # Generated experiment outputs. Curated acceptance summaries remain committed
 # under docs/results/ so a clone stays small while raw CI artifacts remain downloadable.

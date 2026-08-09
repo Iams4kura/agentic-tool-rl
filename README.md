@@ -46,7 +46,7 @@ flowchart LR
 
 ## 快速开始
 
-需要 Python 3.11、Git 和 [uv](https://docs.astral.sh/uv/)。
+需要 Git；项目固定 CPython 3.11.15 与 [uv 0.11.29](https://docs.astral.sh/uv/)，`uv.toml` 会拒绝漂移的 uv 版本。
 
 ~~~bash
 git clone https://github.com/Iams4kura/agentic-tool-rl.git
@@ -55,7 +55,7 @@ make sync
 make ci
 ~~~
 
-**make ci** 与主 GitHub Actions 一致：Ruff、strict mypy、pytest，再运行轻量 smoke。smoke 使用 32/12/32 的 train/dev/test 和一个 seed，只比较：
+**make ci** 与主 GitHub Actions 一致：先检查 lockfile，再运行 Ruff、strict mypy、pytest、轻量 smoke，最后两次隔离构建 wheel/sdist 并校验逐字节可复现性、归档路径和敏感文件。smoke 使用 32/12/32 的 train/dev/test 和一个 seed，只比较：
 
 - **B-BC-Mask**
 - **E-PPO-Progress-Mask**
@@ -105,13 +105,27 @@ paired TSR difference CI lower bound for E - B > 0
 完成后强校验证据：
 
 ~~~bash
-uv run agentic-tool-rl verify-run \
+uv run --locked agentic-tool-rl verify-run \
   --manifest artifacts/runs/full/<run-id>/run-manifest.json
 ~~~
 
 verify-run 会确定性重生成 benchmark 与动作集、逐步重放环境，并用声明的 checkpoint、FeatureEncoder 和 Progress Estimator 确定性重跑每个 case，逐字段核对动作、mask、log-prob、value、奖励和终态；同时校验 training metadata、BC 无漂移、PPO 有真实更新与非零 L2 delta、Resume Guard 四类哈希、case 精确覆盖、指标一致性复算和 canonical 报告复算。因此仅替换 trace、metrics 与哈希不能伪造更高结果。recompute 与 verifier 都从原始 trace 重新计算，但复用同一 compute_metrics 定义，不声称存在第二套独立指标实现。
 
-每个 `<run-id>/` 是自包含证据包：内部 `benchmark/` 保存该次运行使用的完整冻结快照，`run-manifest.json` 的所有 artifact 路径都相对 manifest 所在目录。整个目录下载、搬迁或重命名后仍可直接执行 `verify-run`，不依赖原始工作目录；绝对路径、`..` 和逃逸 bundle 的符号链接都会被拒绝。
+每个 `<run-id>/` 是路径自包含的证据包：内部 `benchmark/` 保存该次运行使用的完整冻结快照，`run-manifest.json` 的所有 artifact 路径都相对 manifest 所在目录。整个目录下载、搬迁或重命名后仍可验证，不依赖原始工作目录；绝对路径、`..` 和逃逸 bundle 的符号链接都会被拒绝。验证器同时强制 source/runtime identity，因此历史证据必须配合产生它的 tag 与精确运行时，不能直接用演进后的 `main` 绕过身份检查。
+
+已发布的 v0.1.0 canonical 证据使用固定 Release 入口验证：
+
+~~~bash
+uv run --locked python scripts/verify_release.py --release v0.1.0
+~~~
+
+该命令额外要求 Darwin/arm64（发布证据的固定重放平台）且系统 `PATH` 中可用 `zstd`；其他平台会在下载证据前 fail-closed。它只接受仓库内 allowlist 的 Release：校验 annotated tag object、peeled commit、source fingerprint、平台、CPython/Torch/uv 版本、46 MiB 归档与 195 个文件摘要，然后用 v0.1.0 tag 中的 checkpoint-bound verifier 重放 30 runs / 30,000 evaluation units。它没有任意 ref、URL 或 `ignore/skip` 参数。
+
+仅检查 Python 分发包可复现性与归档安全时运行：
+
+~~~bash
+make package-check
+~~~
 
 ## 指标口径
 

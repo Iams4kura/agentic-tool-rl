@@ -46,6 +46,7 @@ from agentic_tool_rl.evaluation import (
     RunInputHashes,
     assert_exact_case_ids,
     build_case_id_manifest,
+    compare_metrics,
     compute_metrics,
     evaluate_action_validity,
     file_sha256,
@@ -454,7 +455,11 @@ def run_experiment_matrix(
         shared_dir.mkdir(parents=True, exist_ok=True)
         shared_checkpoint = shared_dir / "bc-checkpoint.pt"
         if shared_checkpoint.exists():
-            bc_model, estimator, encoder, shared_metadata = load_checkpoint(shared_checkpoint)
+            bc_model, estimator, encoder, shared_metadata = load_checkpoint(
+                shared_checkpoint,
+                expected_variant="shared-bc",
+                expected_seed=seed,
+            )
             bc_payload = shared_metadata.get("bc")
             progress_payload = shared_metadata.get("progress")
             if not isinstance(bc_payload, dict) or not isinstance(progress_payload, dict):
@@ -492,20 +497,28 @@ def run_experiment_matrix(
             variant_dir.mkdir(parents=True, exist_ok=True)
             checkpoint = variant_dir / "checkpoint.pt"
             training_path = variant_dir / "training.json"
-            if checkpoint.exists() != training_path.exists():
+            if training_path.exists() and not checkpoint.exists():
                 raise RuntimeError(f"partial training artifacts for {variant.name}/seed-{seed}")
             if checkpoint.exists():
                 model, variant_estimator, loaded_encoder, checkpoint_metadata = load_checkpoint(
-                    checkpoint
+                    checkpoint,
+                    expected_variant=variant.name,
+                    expected_seed=seed,
                 )
                 if loaded_encoder.fingerprint() != encoder.fingerprint():
                     raise RuntimeError("cached variant feature encoder differs from shared BC")
                 estimator = variant_estimator
-                training_payload = json.loads(training_path.read_text(encoding="utf-8"))
-                if not isinstance(training_payload, dict):
-                    raise RuntimeError("training evidence must be a JSON object")
-                if checkpoint_metadata != training_payload:
-                    raise RuntimeError("cached checkpoint metadata differs from training evidence")
+                restore_training_evidence = not training_path.exists()
+                if restore_training_evidence:
+                    training_payload = checkpoint_metadata
+                else:
+                    training_payload = json.loads(training_path.read_text(encoding="utf-8"))
+                    if not isinstance(training_payload, dict):
+                        raise RuntimeError("training evidence must be a JSON object")
+                    if checkpoint_metadata != training_payload:
+                        raise RuntimeError(
+                            "cached checkpoint metadata differs from training evidence"
+                        )
                 if training_payload.get("variant") != variant.model_dump(mode="json"):
                     raise RuntimeError("cached training evidence has a different variant config")
                 if int(training_payload.get("seed", -1)) != seed:
@@ -531,6 +544,8 @@ def run_experiment_matrix(
                         raise RuntimeError("cached BC variant contains PPO updates or drift")
                 elif ppo_updates <= 0 or parameter_l2_delta <= 0.0:
                     raise RuntimeError("cached PPO variant has no real update evidence")
+                if restore_training_evidence:
+                    write_json_atomic(training_path, training_payload)
             else:
                 ppo_metrics = None
                 rollout_steps = 0
@@ -1131,6 +1146,19 @@ def _verify_checkpoint_policy_trace(
     )
 
 
+def _claim_metric_projection(trace: Mapping[str, Any]) -> dict[str, Any]:
+    """Retain only fields needed for the three aggregate claim metrics."""
+
+    return {
+        "case_id": trace["case_id"],
+        "family": trace["family"],
+        "success": trace["success"],
+        "optimal_steps": trace["optimal_steps"],
+        "step_count": trace["step_count"],
+        "simulated_latency_s": trace["simulated_latency_s"],
+    }
+
+
 def verify_experiment_manifest(path: str | Path) -> dict[str, Any]:
     """Fail closed unless every declared run is rooted in replayable evidence."""
 
@@ -1333,7 +1361,17 @@ def verify_experiment_manifest(path: str | Path) -> dict[str, Any]:
     shared_models: dict[int, tuple[torch.nn.Module, str, str, Mapping[str, Any], str]] = {}
     observed_units = 0
     checked: list[dict[str, Any]] = []
-    verified_trace_rows: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    verified_case_ids: dict[tuple[str, int], tuple[str, ...]] = {}
+    verified_successes: dict[tuple[str, int], dict[str, bool]] = {}
+    comparison = ablation.canonical_comparison
+    comparison_names = (
+        comparison.total_system_baseline_variant,
+        comparison.matched_baseline_variant,
+        comparison.treatment_variant,
+    )
+    comparison_metric_rows: dict[str, list[dict[str, Any]]] = {
+        name: [] for name in comparison_names
+    }
     training_keys = {
         "schema_version",
         "variant",
@@ -1393,7 +1431,9 @@ def verify_experiment_manifest(path: str | Path) -> dict[str, Any]:
             shared_path = root / "shared" / f"seed-{seed}" / "bc-checkpoint.pt"
             shared_hash = file_sha256(shared_path)
             loaded_shared_model, _, shared_encoder, loaded_shared_metadata = load_checkpoint(
-                shared_path
+                shared_path,
+                expected_variant="shared-bc",
+                expected_seed=seed,
             )
             shared_raw = _checkpoint_payload(shared_path)
             if shared_raw.get("seed") != seed or shared_raw.get("variant") != "shared-bc":
@@ -1426,7 +1466,11 @@ def verify_experiment_manifest(path: str | Path) -> dict[str, Any]:
             checkpoint_estimator,
             checkpoint_encoder,
             checkpoint_metadata,
-        ) = load_checkpoint(checkpoint_path)
+        ) = load_checkpoint(
+            checkpoint_path,
+            expected_variant=variant,
+            expected_seed=seed,
+        )
         checkpoint_raw = _checkpoint_payload(checkpoint_path)
         if checkpoint_raw.get("seed") != seed or checkpoint_raw.get("variant") != variant:
             raise RuntimeError(f"checkpoint identity mismatch in {checkpoint_path}")
@@ -1515,7 +1559,6 @@ def verify_experiment_manifest(path: str | Path) -> dict[str, Any]:
             )
         )
         trace_rows = read_jsonl(trace_path)
-        verified_trace_rows[(variant, seed)] = trace_rows
         assert_exact_case_ids(
             expected_case_ids, (str(row.get("case_id", "")) for row in trace_rows)
         )
@@ -1532,9 +1575,29 @@ def verify_experiment_manifest(path: str | Path) -> dict[str, Any]:
                 variant=variant_config,
             )
 
-        recomputed = recompute_metrics(
-            trace_path, published_metrics_path=metrics_path, tolerance=1e-9
+        if claim_mode == "canonical":
+            verified_case_ids[(variant, seed)] = tuple(
+                str(row["case_id"]) for row in trace_rows
+            )
+            verified_successes[(variant, seed)] = {
+                str(row["case_id"]): bool(row["success"]) for row in trace_rows
+            }
+            if variant in comparison_metric_rows:
+                comparison_metric_rows[variant].extend(
+                    _claim_metric_projection(row) for row in trace_rows
+                )
+
+        published_metrics = _read_json_object(
+            metrics_path, description="published run metrics"
         )
+        recomputed_metrics = compute_metrics(
+            trace_rows,
+            timeout_s=config.evaluation.timeout_s,
+            bootstrap_samples=config.evaluation.bootstrap_samples,
+            bootstrap_seed=config.evaluation.bootstrap_seed + seed,
+            confidence=config.evaluation.confidence,
+        )
+        recomputed = compare_metrics(recomputed_metrics, published_metrics, tolerance=1e-9)
         if not recomputed.matches:
             raise RuntimeError(f"metric mismatch in {trace_path}")
         if (
@@ -1578,17 +1641,8 @@ def verify_experiment_manifest(path: str | Path) -> dict[str, Any]:
         )
         if declared_claim_path != claim_path.resolve():
             raise RuntimeError("canonical claim path is not rooted in the run directory")
-        comparison = ablation.canonical_comparison
-        comparison_names = (
-            comparison.total_system_baseline_variant,
-            comparison.matched_baseline_variant,
-            comparison.treatment_variant,
-        )
         all_variant_runs = {
             name: [run for run in runs if run["variant"] == name] for name in variants
-        }
-        comparison_runs = {
-            name: [run for run in runs if run["variant"] == name] for name in comparison_names
         }
         if any(len(values) != len(seeds) for values in all_variant_runs.values()):
             raise RuntimeError("canonical claim lacks paired A-F seed runs")
@@ -1599,22 +1653,14 @@ def verify_experiment_manifest(path: str | Path) -> dict[str, Any]:
             success_by_variant_seed[name] = {}
             for run in all_variant_runs[name]:
                 run_seed = int(run["seed"])
-                rows = verified_trace_rows[(name, run_seed)]
-                case_ids_by_variant_seed[name][run_seed] = tuple(
-                    str(row["case_id"]) for row in rows
-                )
-                success_by_variant_seed[name][run_seed] = {
-                    str(row["case_id"]): bool(row["success"]) for row in rows
-                }
+                case_ids_by_variant_seed[name][run_seed] = verified_case_ids[(name, run_seed)]
+                success_by_variant_seed[name][run_seed] = verified_successes[(name, run_seed)]
 
         summaries: dict[str, dict[str, float | None]] = {}
         for name in comparison_names:
-            combined_rows = [
-                row
-                for run in comparison_runs[name]
-                for row in verified_trace_rows[(name, int(run["seed"]))]
-            ]
-            aggregate = compute_metrics(combined_rows, timeout_s=config.evaluation.timeout_s)
+            aggregate = compute_metrics(
+                comparison_metric_rows[name], timeout_s=config.evaluation.timeout_s
+            )
             summaries[name] = {
                 "tsr": aggregate.tsr,
                 "successful_conditional_simulated_service_time_s": (

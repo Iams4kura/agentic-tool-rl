@@ -265,6 +265,8 @@ verifier：
 7. 使用同一 compute_metrics 做 trace 一致性复算；
 8. 验证 A–F 完整 outcomes，并重建 paired A/B/E bootstrap CI 与 claim-check.json。
 
+`verify-run` 强制 source/runtime identity，适用于当前源码产生的 run。验证已经发布、随后源码继续演进的历史证据时，应使用 tag-bound 入口，例如 `uv run --locked python scripts/verify_release.py --release v0.1.0`；该入口会先固定 Release 资产、tag object、commit、源码、运行时和 uv 版本，再调用对应 tag 内的 `verify-run`。
+
 ## 12. 恢复语义
 
 TraceStore 以换行完成一条 JSONL 提交；崩溃时只截断末尾不完整行。相同 case/相同内容追加是 no-op，相同 case/不同内容冲突。Resume Guard 在读取非空 trace 前验证四类输入；缺 guard 的历史 trace 不可追认，任一输入变化都必须进入新 run。

@@ -1,0 +1,47 @@
+{
+  "schema_version": "release-evidence-v1",
+  "release": "v0.1.0",
+  "repository": "Iams4kura/agentic-tool-rl",
+  "tag": {
+    "name": "v0.1.0",
+    "object_oid": "98945d0a0dca8f3d14f6854ccb19b87e4bf11f9e",
+    "commit_oid": "7c3fe39c8bcad902d05bddcdd9273e9848f0507f"
+  },
+  "source": {
+    "fingerprint_schema": "source-fingerprint-v1",
+    "sha256": "75eb32b7a94178616eaa977f0c42f147143af904fd09d69928cde000bbfe40d3"
+  },
+  "runtime": {
+    "python_implementation": "CPython",
+    "python_version": "3.11.15",
+    "python_cache_tag": "cpython-311",
+    "torch_version": "2.13.0",
+    "torch_cuda_version": null
+  },
+  "toolchain": {
+    "uv_version": "0.11.29"
+  },
+  "replay_platform": {
+    "system": "Darwin",
+    "machine": "arm64"
+  },
+  "archive": {
+    "name": "agentic-tool-rl-benchmark-v1.3-886622c5cb6cffc3.tar.zst",
+    "size_bytes": 48682413,
+    "sha256": "0de48d58521aebadef8abdf990616c5dc5787de56c0f27a4d9c9bfa9033ff56f",
+    "root": "agentic-tool-rl-benchmark-v1.3-886622c5cb6cffc3"
+  },
+  "files_manifest": {
+    "name": "agentic-tool-rl-benchmark-v1.3-886622c5cb6cffc3.files.sha256",
+    "size_bytes": 21182,
+    "sha256": "2ac783f24ff7af77c39201d2b286b72f47206f85176ebd74e073237fcbce7a4f",
+    "entry_count": 195
+  },
+  "run_manifest": {
+    "path": "run-manifest.json",
+    "sha256": "5153952e0e7cef78da1338a37b0b57b53b75e7b38174d4d5584cafabeca38b19",
+    "run_id": "886622c5cb6cffc3",
+    "runs": 30,
+    "evaluation_units": 30000
+  }
+}
