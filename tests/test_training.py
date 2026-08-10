@@ -65,6 +65,17 @@ def test_progress_training_and_masked_episode_is_auditable(tmp_path: Path) -> No
 
     assert bc_metrics.updates > 0
     assert progress.examples > 0
+    assert progress.quality_status == (
+        "confirmatory" if progress.dev_quality_gate.passed else "exploratory"
+    )
+    assert progress.dev_gate_scope == "nonterminal_prefix_only"
+    assert progress.dev_gate_examples == progress.dev_sampling.done_counts["0"]
+    assert progress.dev_sampling.done_counts["0"] > 0
+    assert progress.dev_sampling.done_counts["1"] > 0
+    assert (
+        progress.continuation_implementation_sha256
+        == progress.dev_sampling.policy_implementation_sha256
+    )
     assert estimator.frozen
     assert result.trace["step_count"] == len(result.records)
     assert result.records[-1].done

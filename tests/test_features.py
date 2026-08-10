@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import torch
 
+from agentic_tool_rl.contracts import Split
+from agentic_tool_rl.envs.benchmark import generate_tasks
+from agentic_tool_rl.envs.workflow import TransactionalWorkflowEnv
 from agentic_tool_rl.features import FeatureEncoder
+from agentic_tool_rl.grounding.action_mask import ActionMask
+from agentic_tool_rl.policy_input import PolicyInput
 
 
 def test_feature_encoder_is_deterministic_and_ignores_evidence_call_id() -> None:
@@ -112,6 +117,74 @@ def test_decision_features_encode_public_entity_grounding_relation() -> None:
         encoder.encode_action(candidates[0]),
         encoder.encode_action(candidates[1]),
     )
+
+
+def test_policy_input_action_features_consume_public_schema_content() -> None:
+    task = generate_tasks(Split.TEST, 1, base_seed=1510)[0]
+    environment = TransactionalWorkflowEnv(task)
+    observation = environment.observe()
+    candidates = environment.candidate_actions()
+    public_mask = ActionMask(task.tool_schemas).mask(observation, candidates)
+    policy_input = PolicyInput.from_decision(
+        observation,
+        candidates,
+        public_mask,
+        task.tool_schemas,
+    )
+    encoder = FeatureEncoder(state_dim=64, action_dim=128)
+    original = encoder.encode_policy_input(policy_input)
+    candidate = policy_input.candidates[0]
+
+    def changed_action(**schema_updates: object) -> torch.Tensor:
+        changed_schema = candidate.tool_schema.model_copy(update=schema_updates)
+        changed_candidate = candidate.model_copy(update={"tool_schema": changed_schema})
+        changed_input = policy_input.model_copy(
+            update={
+                "candidates": (changed_candidate, *policy_input.candidates[1:]),
+            }
+        )
+        return encoder.encode_policy_input(changed_input).actions[0]
+
+    assert original.policy_input_sha256 == policy_input.sha256()
+    assert not torch.equal(
+        original.actions[0],
+        changed_action(description="semantically distinct cancellation operation"),
+    )
+    assert original.actions[0, 2] != changed_action(
+        mutating=not candidate.tool_schema.mutating
+    )[2]
+    assert original.actions[0, 3] != changed_action(
+        idempotent=not candidate.tool_schema.idempotent
+    )[3]
+    assert original.actions[0, 6] != changed_action(
+        required_completed_operations=("op_aaaaaaaaaaaaaaaaaaaa",)
+    )[6]
+
+
+def test_encode_policy_input_uses_public_mask_with_explicit_ablation_override() -> None:
+    task = generate_tasks(Split.TEST, 1, base_seed=1511)[0]
+    environment = TransactionalWorkflowEnv(task)
+    observation = environment.observe()
+    candidates = environment.candidate_actions()
+    public_mask = ActionMask(task.tool_schemas).mask(observation, candidates)
+    policy_input = PolicyInput.from_decision(
+        observation,
+        candidates,
+        public_mask,
+        task.tool_schemas,
+    )
+    encoder = FeatureEncoder(32, 32)
+
+    masked = encoder.encode_policy_input(policy_input)
+    unmasked = encoder.encode_policy_input(
+        policy_input,
+        selection_mask=[True] * len(candidates),
+    )
+
+    assert masked.mask.tolist() == public_mask
+    assert unmasked.mask.all()
+    assert torch.equal(masked.state, unmasked.state)
+    assert torch.equal(masked.actions, unmasked.actions)
 
 
 def test_state_features_use_goal_semantics_but_redact_case_identifiers() -> None:

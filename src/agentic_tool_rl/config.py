@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import resources
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
@@ -219,21 +220,30 @@ class QwenGPUConfig(StrictModel):
 
 
 ConfigDocument: TypeAlias = ExperimentConfig | AblationConfig | QwenGPUConfig
+PackagedConfigName: TypeAlias = Literal[
+    "ablation.yaml",
+    "cpu_full.yaml",
+    "qwen3_lora_gpu.yaml",
+    "smoke.yaml",
+]
+PACKAGED_CONFIG_NAMES: frozenset[str] = frozenset(
+    {
+        "ablation.yaml",
+        "cpu_full.yaml",
+        "qwen3_lora_gpu.yaml",
+        "smoke.yaml",
+    }
+)
 
 
-def _load_raw(path: str | Path) -> dict[str, Any]:
-    source = Path(path)
-    with source.open("r", encoding="utf-8") as handle:
-        value = yaml.safe_load(handle)
+def _parse_raw(text: str, *, source: str) -> dict[str, Any]:
+    value = yaml.safe_load(text)
     if not isinstance(value, dict):
         raise ValueError(f"config {source} must contain a YAML object")
     return value
 
 
-def load_config(path: str | Path) -> ConfigDocument:
-    """Load one supported config kind with strict unknown-field rejection."""
-
-    raw = _load_raw(path)
+def _validate_document(raw: dict[str, Any]) -> ConfigDocument:
     kind = raw.get("kind")
     if kind == "experiment":
         return ExperimentConfig.model_validate(raw)
@@ -244,10 +254,37 @@ def load_config(path: str | Path) -> ConfigDocument:
     raise ValueError(f"unsupported config kind {kind!r}")
 
 
-def dry_run_config(path: str | Path) -> dict[str, Any]:
+def load_config(path: str | Path) -> ConfigDocument:
+    """Load an explicit user path without any cwd or package fallback."""
+
+    source = Path(path)
+    return _validate_document(
+        _parse_raw(source.read_text(encoding="utf-8"), source=str(source))
+    )
+
+
+def load_packaged_config(name: PackagedConfigName | str) -> ConfigDocument:
+    """Load one immutable default from the installed package resources."""
+
+    if name not in PACKAGED_CONFIG_NAMES:
+        raise ValueError(f"unknown packaged config {name!r}")
+    resource = resources.files("agentic_tool_rl").joinpath("resources", "configs", name)
+    source = f"package resource agentic_tool_rl/resources/configs/{name}"
+    try:
+        text = resource.read_text(encoding="utf-8")
+    except (FileNotFoundError, ModuleNotFoundError) as exc:
+        raise RuntimeError(f"required {source} is missing") from exc
+    return _validate_document(_parse_raw(text, source=source))
+
+
+def dry_run_config(path: str | Path | ConfigDocument) -> dict[str, Any]:
     """Validate wiring without importing model libraries or downloading weights."""
 
-    config = load_config(path)
+    config = (
+        path
+        if isinstance(path, (ExperimentConfig, AblationConfig, QwenGPUConfig))
+        else load_config(path)
+    )
     result: dict[str, Any] = {
         "valid": True,
         "kind": config.kind,
@@ -279,6 +316,7 @@ def dry_run_config(path: str | Path) -> dict[str, Any]:
 
 
 __all__ = [
+    "PACKAGED_CONFIG_NAMES",
     "AblationConfig",
     "AblationVariant",
     "BenchmarkConfig",
@@ -288,7 +326,9 @@ __all__ = [
     "ExperimentConfig",
     "LightweightPolicyConfig",
     "LoRAConfig",
+    "PackagedConfigName",
     "QwenGPUConfig",
     "dry_run_config",
     "load_config",
+    "load_packaged_config",
 ]

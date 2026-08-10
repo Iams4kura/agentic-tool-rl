@@ -145,7 +145,13 @@ class WorkflowTask(ContractModel):
     def limits_are_consistent(self) -> WorkflowTask:
         if self.max_steps < self.optimal_steps:
             raise ValueError("max_steps must be greater than or equal to optimal_steps")
-        if len(self.workflow_nodes) != self.optimal_steps:
+        if self.generator_version.startswith("benchmark-v1.4"):
+            if len(self.workflow_nodes) < self.optimal_steps:
+                raise ValueError("v1.4 world must contain at least the optimal-path nodes")
+        elif len(self.workflow_nodes) != self.optimal_steps:
+            # v1.3's equality is a frozen historical contract.  v1.4 models a
+            # complete world containing executable counterfactual branches, so
+            # only the goal-specific shortest path contributes to optimal_steps.
             raise ValueError("optimal_steps must equal the number of workflow nodes")
         return self
 
@@ -158,6 +164,26 @@ class WorkflowTask(ContractModel):
     @property
     def goal_predicates(self) -> list[StatePredicate]:
         return self.hidden_goal_predicates
+
+
+class CounterfactualWorkflowTask(WorkflowTask):
+    """One goal-conditioned case inside a v1.4 counterfactual world.
+
+    Four cases share the same ``group_id``, world, schemas, initial state, and
+    public candidate process.  ``goal_variant`` is evaluator metadata and must
+    never enter :class:`agentic_tool_rl.policy_input.PolicyInput`.
+    """
+
+    group_id: str
+    goal_variant: Literal["00", "01", "10", "11"]
+
+    @model_validator(mode="after")
+    def version_is_v14(self) -> CounterfactualWorkflowTask:
+        if not self.generator_version.startswith("benchmark-v1.4"):
+            raise ValueError("counterfactual tasks require a benchmark-v1.4 generator")
+        if not self.case_id.startswith(f"{self.group_id}-goal-"):
+            raise ValueError("counterfactual case_id must be scoped by group_id")
+        return self
 
 
 class ValidationResult(ContractModel):

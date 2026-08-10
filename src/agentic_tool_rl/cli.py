@@ -14,7 +14,9 @@ from agentic_tool_rl.config import (
     ExperimentConfig,
     dry_run_config,
     load_config,
+    load_packaged_config,
 )
+from agentic_tool_rl.envs.benchmark_v14 import DEVELOPMENT_BASE_SEED_V14
 from agentic_tool_rl.evaluation import (
     ResumeGuard,
     RunInputHashes,
@@ -35,12 +37,14 @@ from agentic_tool_rl.experiment import (
 )
 from agentic_tool_rl.features import FeatureEncoder
 from agentic_tool_rl.models import ActorCritic, ProgressEstimator
+from agentic_tool_rl.semantic_canary import run_semantic_canary
 from agentic_tool_rl.training import (
     CreditAssignment,
     evaluate_policy,
     load_checkpoint,
     run_episode,
 )
+from agentic_tool_rl.v14_acceptance import run_v14_development_acceptance
 
 app = typer.Typer(
     name="agentic-tool-rl",
@@ -53,17 +57,23 @@ def _echo(value: Any) -> None:
     typer.echo(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
 
 
-def _experiment_config(path: Path) -> ExperimentConfig:
-    value = load_config(path)
+def _experiment_config(
+    path: Path | None,
+    *,
+    default_resource: str = "cpu_full.yaml",
+) -> ExperimentConfig:
+    value = load_config(path) if path is not None else load_packaged_config(default_resource)
     if not isinstance(value, ExperimentConfig):
-        raise typer.BadParameter(f"{path} is not an experiment config")
+        source = str(path) if path is not None else f"package resource {default_resource}"
+        raise typer.BadParameter(f"{source} is not an experiment config")
     return value
 
 
-def _ablation_config(path: Path) -> AblationConfig:
-    value = load_config(path)
+def _ablation_config(path: Path | None) -> AblationConfig:
+    value = load_config(path) if path is not None else load_packaged_config("ablation.yaml")
     if not isinstance(value, AblationConfig):
-        raise typer.BadParameter(f"{path} is not an ablation config")
+        source = str(path) if path is not None else "package resource ablation.yaml"
+        raise typer.BadParameter(f"{source} is not an ablation config")
     return value
 
 
@@ -112,8 +122,8 @@ def _variant_credit_assignment(variant: AblationVariant) -> CreditAssignment:
 @app.command("generate")
 def generate_command(
     config: Annotated[
-        Path, typer.Option("--config", "-c", help="Experiment YAML config")
-    ] = Path("configs/cpu_full.yaml"),
+        Path | None, typer.Option("--config", "-c", help="Experiment YAML config")
+    ] = None,
     output: Annotated[
         Path, typer.Option("--output", "-o", help="Benchmark artifact directory")
     ] = Path("artifacts/benchmark-v1"),
@@ -137,12 +147,8 @@ def generate_command(
 
 @app.command("train")
 def train_command(
-    config: Annotated[Path, typer.Option("--config", "-c")] = Path(
-        "configs/cpu_full.yaml"
-    ),
-    ablation: Annotated[Path, typer.Option("--ablation", "-a")] = Path(
-        "configs/ablation.yaml"
-    ),
+    config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
+    ablation: Annotated[Path | None, typer.Option("--ablation", "-a")] = None,
     benchmark_dir: Annotated[Path, typer.Option("--benchmark-dir")] = Path(
         "artifacts/benchmark-v1"
     ),
@@ -171,12 +177,8 @@ def train_command(
 
 @app.command("smoke")
 def smoke_command(
-    config: Annotated[Path, typer.Option("--config", "-c")] = Path(
-        "configs/smoke.yaml"
-    ),
-    ablation: Annotated[Path, typer.Option("--ablation", "-a")] = Path(
-        "configs/ablation.yaml"
-    ),
+    config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
+    ablation: Annotated[Path | None, typer.Option("--ablation", "-a")] = None,
     benchmark_dir: Annotated[Path, typer.Option("--benchmark-dir")] = Path(
         "artifacts/benchmark-smoke"
     ),
@@ -186,7 +188,7 @@ def smoke_command(
 ) -> None:
     """Run the CI-sized generation → BC → PPO → evaluation → recompute loop."""
 
-    experiment = _experiment_config(config)
+    experiment = _experiment_config(config, default_resource="smoke.yaml")
     matrix = _ablation_config(ablation)
     prepare_benchmark(experiment, benchmark_dir)
     result = run_experiment_matrix(
@@ -203,12 +205,8 @@ def smoke_command(
 
 @app.command("ablate")
 def ablate_command(
-    config: Annotated[Path, typer.Option("--config", "-c")] = Path(
-        "configs/cpu_full.yaml"
-    ),
-    ablation: Annotated[Path, typer.Option("--ablation", "-a")] = Path(
-        "configs/ablation.yaml"
-    ),
+    config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
+    ablation: Annotated[Path | None, typer.Option("--ablation", "-a")] = None,
     benchmark_dir: Annotated[Path, typer.Option("--benchmark-dir")] = Path(
         "artifacts/benchmark-v1"
     ),
@@ -251,7 +249,7 @@ def ablate_command(
 def run_episode_command(
     checkpoint: Annotated[Path, typer.Option("--checkpoint")],
     variant_name: Annotated[str, typer.Option("--variant")],
-    ablation: Annotated[Path, typer.Option("--ablation", "-a")],
+    ablation: Annotated[Path | None, typer.Option("--ablation", "-a")] = None,
     benchmark_dir: Annotated[Path, typer.Option("--benchmark-dir")] = Path(
         "artifacts/benchmark-v1"
     ),
@@ -259,9 +257,7 @@ def run_episode_command(
     output: Annotated[Path, typer.Option("--output", "-o")] = Path(
         "artifacts/demo-episode.json"
     ),
-    config: Annotated[Path, typer.Option("--config", "-c")] = Path(
-        "configs/cpu_full.yaml"
-    ),
+    config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
 ) -> None:
     """Execute one fully expanded, auditable policy episode."""
 
@@ -304,13 +300,11 @@ def run_episode_command(
 def evaluate_command(
     checkpoint: Annotated[Path, typer.Option("--checkpoint")],
     variant_name: Annotated[str, typer.Option("--variant")],
-    ablation: Annotated[Path, typer.Option("--ablation", "-a")],
+    ablation: Annotated[Path | None, typer.Option("--ablation", "-a")] = None,
     benchmark_dir: Annotated[Path, typer.Option("--benchmark-dir")] = Path(
         "artifacts/benchmark-v1"
     ),
-    config: Annotated[Path, typer.Option("--config", "-c")] = Path(
-        "configs/cpu_full.yaml"
-    ),
+    config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
     output: Annotated[Path, typer.Option("--output", "-o")] = Path(
         "artifacts/evaluation"
     ),
@@ -392,15 +386,51 @@ def verify_run_command(
     _echo(verify_experiment_manifest(manifest))
 
 
+@app.command("benchmark-v14")
+def benchmark_v14_command(
+    output: Annotated[Path, typer.Option("--output", "-o")] = Path(
+        "artifacts/benchmark-v1.4-development"
+    ),
+    train_groups: Annotated[int, typer.Option("--train-groups", min=1)] = 500,
+    dev_groups: Annotated[int, typer.Option("--dev-groups", min=1)] = 100,
+    test_groups: Annotated[int, typer.Option("--test-groups", min=1)] = 250,
+    base_seed: Annotated[int, typer.Option("--base-seed")] = DEVELOPMENT_BASE_SEED_V14,
+) -> None:
+    """Generate and gate non-canonical v1.4 development artifacts."""
+
+    _echo(
+        run_v14_development_acceptance(
+            output,
+            train_groups=train_groups,
+            dev_groups=dev_groups,
+            test_groups=test_groups,
+            base_seed=base_seed,
+        )
+    )
+
+
 @app.command("qwen-dry-run")
 def qwen_dry_run_command(
-    config: Annotated[Path, typer.Option("--config", "-c")] = Path(
-        "configs/qwen3_lora_gpu.yaml"
-    ),
+    config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
 ) -> None:
     """Validate optional Qwen/LoRA/GPU wiring without downloading weights."""
 
-    _echo(dry_run_config(config))
+    document = (
+        load_config(config)
+        if config is not None
+        else load_packaged_config("qwen3_lora_gpu.yaml")
+    )
+    _echo(dry_run_config(document))
+
+
+@app.command("semantic-canary")
+def semantic_canary_command(
+    config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
+) -> None:
+    """Run the deterministic learner semantic gate independently of smoke structure."""
+
+    experiment = _experiment_config(config, default_resource="smoke.yaml")
+    _echo(run_semantic_canary(experiment))
 
 
 if __name__ == "__main__":

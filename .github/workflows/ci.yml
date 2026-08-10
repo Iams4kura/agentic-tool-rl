@@ -56,3 +56,80 @@ jobs:
 
       - name: Build and inspect reproducible distributions
         run: make package-check
+
+  compatibility:
+    name: Core compatibility (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv and select Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.29"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Check lockfile freshness
+        run: uv lock --check
+
+      - name: Sync locked dependencies
+        run: uv sync --extra dev --locked --python ${{ matrix.python-version }}
+
+      - name: Run cross-version contracts
+        run: >-
+          uv run --locked --python ${{ matrix.python-version }} pytest -q
+          tests/test_package_resources.py
+          tests/test_policy_input.py
+          tests/test_benchmark_v14.py
+          tests/test_v14_acceptance.py
+
+      - name: Verify installed default config path
+        run: >-
+          uv run --locked --python ${{ matrix.python-version }} python -c
+          "from agentic_tool_rl.config import load_packaged_config;
+          assert load_packaged_config('smoke.yaml').name == 'cpu-smoke'"
+
+  portable-verification-macos:
+    name: Portable verification (macOS, Python 3.11)
+    runs-on: macos-14
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv and select Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.29"
+          python-version: "3.11.15"
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            build-constraints.txt
+
+      - name: Check lockfile freshness
+        run: uv lock --check
+
+      - name: Sync locked dependencies
+        run: uv sync --extra dev --locked
+
+      - name: Run portable integrity and trace verification
+        run: >-
+          uv run --locked pytest -q
+          tests/test_release_verifier.py
+          tests/test_package_resources.py
+          tests/test_cli.py::test_smoke_runs_real_lightweight_loop_and_verify_run_accepts_it

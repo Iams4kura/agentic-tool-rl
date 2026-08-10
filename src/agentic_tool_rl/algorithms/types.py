@@ -36,6 +36,106 @@ class PolicyBatch:
 
 
 @dataclass(frozen=True)
+class ExpertBatch:
+    """Candidate-set supervision with one or more valid expert actions per state."""
+
+    states: Tensor
+    action_features: Tensor
+    candidate_mask: Tensor
+    positive_mask: Tensor
+    visible_state_sha256s: tuple[str, ...] = ()
+    source_case_ids: tuple[str, ...] = ()
+    source_path_counts: tuple[tuple[str, int], ...] = ()
+
+    def validate(self) -> None:
+        if self.states.ndim != 2:
+            raise ValueError("states must have shape [N, S]")
+        if self.action_features.ndim != 3:
+            raise ValueError("action_features must have shape [N, A, D]")
+        if self.candidate_mask.ndim != 2:
+            raise ValueError("candidate_mask must have shape [N, A]")
+        if self.positive_mask.ndim != 2:
+            raise ValueError("positive_mask must have shape [N, A]")
+        size = self.states.shape[0]
+        if size == 0:
+            raise ValueError("expert batch must contain at least one state")
+        if any(
+            tensor.shape[0] != size
+            for tensor in (
+                self.action_features,
+                self.candidate_mask,
+                self.positive_mask,
+            )
+        ):
+            raise ValueError("expert batch tensors are not aligned")
+        if self.action_features.shape[:2] != self.candidate_mask.shape:
+            raise ValueError("candidate features and candidate_mask shapes differ")
+        if self.candidate_mask.shape != self.positive_mask.shape:
+            raise ValueError("candidate_mask and positive_mask shapes differ")
+        if self.action_features.shape[1] == 0:
+            raise ValueError("every state must expose at least one candidate slot")
+
+        device = self.states.device
+        if not self.states.is_floating_point():
+            raise ValueError("states must use a floating dtype")
+        if (
+            not self.action_features.is_floating_point()
+            or self.action_features.dtype != self.states.dtype
+        ):
+            raise ValueError("action_features must use the states floating dtype")
+        for name, mask in (
+            ("candidate_mask", self.candidate_mask),
+            ("positive_mask", self.positive_mask),
+        ):
+            if mask.dtype != torch.bool:
+                raise ValueError(f"{name} must use bool dtype")
+            if mask.device != device:
+                raise ValueError(f"{name} must share the policy tensor device")
+        if self.action_features.device != device:
+            raise ValueError("action_features must share the states device")
+        if not bool(torch.isfinite(self.states).all()) or not bool(
+            torch.isfinite(self.action_features).all()
+        ):
+            raise ValueError("expert features must be finite")
+        if not bool(self.candidate_mask.any(dim=1).all()):
+            raise ValueError("every state must expose at least one candidate")
+        if not bool(self.positive_mask.any(dim=1).all()):
+            raise ValueError("every state must expose at least one positive candidate")
+        if bool((self.positive_mask & ~self.candidate_mask).any()):
+            raise ValueError("positive_mask must be a subset of candidate_mask")
+        if self.visible_state_sha256s:
+            if len(self.visible_state_sha256s) != size:
+                raise ValueError("visible_state_sha256s must align with expert states")
+            if any(
+                len(value) != 64
+                or any(character not in "0123456789abcdef" for character in value)
+                for value in self.visible_state_sha256s
+            ):
+                raise ValueError("visible_state_sha256s must contain lowercase SHA-256 values")
+            if len(set(self.visible_state_sha256s)) != size:
+                raise ValueError("expert states must be unique by visible-state SHA-256")
+        if self.source_case_ids and (
+            len(self.source_case_ids) != size
+            or any(not case_id for case_id in self.source_case_ids)
+        ):
+            raise ValueError("source_case_ids must align with expert states")
+        if bool(self.visible_state_sha256s) != bool(self.source_case_ids):
+            raise ValueError(
+                "visible-state hashes and source case ids must be audited together"
+            )
+        if self.source_path_counts:
+            case_ids = [case_id for case_id, _count in self.source_path_counts]
+            if any(not case_id for case_id in case_ids) or len(set(case_ids)) != len(case_ids):
+                raise ValueError("source_path_counts must contain unique non-empty case ids")
+            if any(count < 4 for _case_id, count in self.source_path_counts):
+                raise ValueError("every v1.4 task must contribute at least four source paths")
+            if set(case_ids) != set(self.source_case_ids):
+                raise ValueError(
+                    "source_path_counts must cover every audited expert-state task"
+                )
+
+
+@dataclass(frozen=True)
 class PPOBatch(PolicyBatch):
     old_log_probs: Tensor
     old_values: Tensor

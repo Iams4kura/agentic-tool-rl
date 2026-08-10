@@ -63,6 +63,11 @@ def test_workflows_enforce_locked_read_only_toolchain() -> None:
 
     assert "  push:\n    branches:\n      - main\n" in workflows["ci.yml"]
     assert "run: make package-check" in workflows["ci.yml"]
+    assert "portable-verification-macos:" in workflows["ci.yml"]
+    assert "runs-on: macos-14" in workflows["ci.yml"]
+    assert "test_smoke_runs_real_lightweight_loop_and_verify_run_accepts_it" in workflows[
+        "ci.yml"
+    ]
     assert "cancel-in-progress: false" in workflows["full-benchmark.yml"]
     assert "cd artifacts" in workflows["full-benchmark.yml"]
     assert "find benchmark-v1 runs/full" in workflows["full-benchmark.yml"]

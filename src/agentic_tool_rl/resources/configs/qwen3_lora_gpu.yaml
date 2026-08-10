@@ -1,0 +1,33 @@
+kind: qwen_gpu
+name: qwen3-4b-step-ppo-lora
+seed: 20260808
+
+model:
+  model_name_or_path: Qwen/Qwen3-4B
+  # Immutable Hugging Face revision resolved on 2026-08-08.
+  revision: 1cfa9a7208912126459214e8b04321603b3df60c
+  dtype: bfloat16
+  trust_remote_code: false
+  attention_implementation: sdpa
+  max_input_tokens: 4096
+  max_new_tokens: 128
+  value_head: separate_linear
+
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+distributed:
+  strategy: fsdp
+  num_gpus: 2
+  gradient_checkpointing: true
+  mixed_precision: bf16
+
+training:
+  per_device_batch_size: 1
+  gradient_accumulation_steps: 16
+  learning_rate: 0.00002
+  max_steps: 2000
+  save_steps: 200

@@ -12,6 +12,13 @@
 
 > 本仓库没有预设目标分数。canonical 结果是一个结构完整、可重算的统计报告；预注册假设未获支持仍然是有效实验，不会被改写为“通过”。
 
+> **科学范围更新：**post-hoc 审计发现，仅使用公开 `PolicyInput` 的 ready-greedy
+> 规则即可在 v1.3 canonical test 上达到 1000/1000（平均 10.12 steps）。因此 v1.3
+> 不能单独支持“模型独立发现 DAG”的解释。历史 tag、资产和数字保持不变；v1.4 将研究
+> 问题收缩为“在公开可执行约束下学习目标条件化的长链动作选择”。详见
+> [v1.3 审计](docs/results/posthoc-v1.3-public-ready.md)与
+> [v1.4 development protocol](docs/protocol/benchmark-v1.4-development.md)。
+
 ## 设计与证据
 
 | 能力 | 当前实现 | 可验证证据 |
@@ -22,6 +29,7 @@
 | Action Mask | 只读取公开 ToolSchema 与 Observation | 独立规则实现、冻结 action-validity-v2、全局 20k 分类证据 |
 | 事务环境 | 验证通过后原子提交；拒绝动作不产生部分写入 | dry-run、状态快照、审计日志、禁止副作用计数 |
 | Benchmark v1.3 | 四种 DAG、opaque operation ID、确定性候选乱序、family×topology held-out | 可确定性重生成的 JSONL、oracle 回放和 SHA256 |
+| Benchmark v1.4 development | 四目标反事实 group；安全、可执行但 goal-incompatible 的 mutation | PolicyInput 不变量、公开 baseline gate、逐题 trace、双生成字节一致性 |
 | 统计报告 | 六变体、五种子、1000 题；主比较 E vs B | 精确配对的 seed/case outcomes 与 1000 次 bootstrap 95% CI |
 | 完整性 | 数据重生成、环境重放、checkpoint 策略重执行、BC/PPO/参数/恢复校验 | verify-run、manifest、checkpoint、recompute、Resume Guard |
 
@@ -55,14 +63,42 @@ make sync
 make ci
 ~~~
 
-**make ci** 与主 GitHub Actions 一致：先检查 lockfile，再运行 Ruff、strict mypy、pytest、轻量 smoke，最后两次隔离构建 wheel/sdist 并校验逐字节可复现性、归档路径和敏感文件。smoke 使用 32/12/32 的 train/dev/test 和一个 seed，只比较：
+**make ci** 与主 GitHub Actions 一致：先检查 lockfile，再运行 Ruff、strict mypy、pytest、轻量 smoke、确定性 semantic canary，最后两次隔离构建 wheel/sdist，并从空目录安装 wheel 验证内置资源与 CLI。smoke 使用 32/12/32 的 train/dev/test 和一个 seed，只比较：
 
 - **B-BC-Mask**
 - **E-PPO-Progress-Mask**
 
 它覆盖生成 → BC/Progress → PPO → 评测 → trace 一致性复算 → run verifier，但 claim_mode=none，不生成 canonical 统计报告。Qwen 检查不属于主 CI。
 
-## 六变体公平矩阵
+默认 CLI 配置来自 wheel 内的 package resources，不依赖当前目录。显式传入
+`--config/--ablation` 时只读取用户给出的路径，不做隐式 fallback。
+
+## v1.4 development acceptance
+
+v1.4 以 500/100/250 个 train/dev/test counterfactual groups 生成
+2,000/400/1,000 cases；每个 world 有四个目标，组内 world、schema、候选顺序和 mask
+完全相同，只有 goal 与隐藏 evaluator target 不同。当前入口只生成和质量验收开发工件：
+
+~~~bash
+uv run --locked agentic-tool-rl benchmark-v14 \
+  --output artifacts/benchmark-v1.4-development
+~~~
+
+命令会生成两次并比较字节，重放全部 oracle，在 dev 上运行 R0–R6 公开规则，保存逐题
+trace，并明确写入 `canonical=false`、`canonical_final_executed=false`。只有 Oracle=100%、
+R1≤25%、最强公开规则<80%、多正例 expert states≥20% 和 goal-incompatible states≥80%
+时才通过。它不会提前执行需要外部时间锚和未来随机信标的 canonical final。
+
+v1.3 公开规则审计可独立复现和二次重放：
+
+~~~bash
+uv run --locked python scripts/audit_v13_public_ready.py \
+  --output artifacts/audits/v1.3-public-ready
+uv run --locked python scripts/audit_v13_public_ready.py --verify-only \
+  --output artifacts/audits/v1.3-public-ready
+~~~
+
+## v1.3 六变体历史矩阵
 
 完整配置位于 configs/cpu_full.yaml，矩阵位于 configs/ablation.yaml。
 

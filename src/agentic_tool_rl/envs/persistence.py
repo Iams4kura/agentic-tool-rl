@@ -15,6 +15,7 @@ from agentic_tool_rl.contracts import (
     ActionValidityManifest,
     BenchmarkFile,
     BenchmarkManifest,
+    CounterfactualWorkflowTask,
     Split,
     WorkflowTask,
 )
@@ -75,7 +76,15 @@ def load_tasks_jsonl(path: str | Path) -> list[WorkflowTask]:
             if not line.strip():
                 continue
             try:
-                tasks.append(WorkflowTask.model_validate_json(line))
+                raw = json.loads(line)
+                if not isinstance(raw, dict):
+                    raise ValueError("task row must be an object")
+                model = (
+                    CounterfactualWorkflowTask
+                    if str(raw.get("generator_version", "")).startswith("benchmark-v1.4")
+                    else WorkflowTask
+                )
+                tasks.append(model.model_validate(raw))
             except ValueError as error:
                 raise ValueError(f"invalid task JSON at line {line_number}") from error
     return tasks

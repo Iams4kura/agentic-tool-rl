@@ -1,0 +1,34 @@
+kind: ablation
+name: benchmark-v1-six-way
+seeds: [17, 29, 43, 71, 101]
+canonical_comparison:
+  treatment_variant: E-PPO-Progress-Mask
+  matched_baseline_variant: B-BC-Mask
+  total_system_baseline_variant: A-BC-Unmasked
+  primary_metric: tsr
+  hypothesis: paired_tsr_difference_ci_lower_gt_zero
+variants:
+  - name: A-BC-Unmasked
+    algorithm: bc
+    progress_reward: false
+    action_mask: false
+  - name: B-BC-Mask
+    algorithm: bc
+    progress_reward: false
+    action_mask: true
+  - name: C-PPO-Sparse-Unmasked
+    algorithm: action_ppo
+    progress_reward: false
+    action_mask: false
+  - name: D-PPO-Sparse-Mask
+    algorithm: action_ppo
+    progress_reward: false
+    action_mask: true
+  - name: E-PPO-Progress-Mask
+    algorithm: action_ppo
+    progress_reward: true
+    action_mask: true
+  - name: F-Sequence-PPO-Progress-Mask
+    algorithm: sequence_ppo
+    progress_reward: true
+    action_mask: true

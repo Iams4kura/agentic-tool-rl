@@ -20,85 +20,8 @@ from agentic_tool_rl.models.adapters.base import (
     EncodedPolicyInput,
     PolicyBackend,
     PolicyOutput,
-    stable_mapping,
 )
-
-_PUBLIC_OBSERVATION_FIELDS = (
-    "step_index",
-    "max_steps",
-    "remaining_steps",
-    "user_goal",
-    "visible_state",
-    "available_entities",
-    "available_tools",
-    "message",
-    "done",
-)
-_INTERNAL_POLICY_KEYS = frozenset(
-    {
-        "audit_log",
-        "call_id",
-        "candidate_valid",
-        "case_id",
-        "forbidden_side_effects",
-        "hidden_goal_predicates",
-        "idempotency_results",
-        "invalid_kind",
-        "label_source",
-        "oracle_plans",
-        "predicted_invalid_kind",
-        "predicted_valid",
-        "processed_call_ids",
-        "safety_token",
-        "schema_label",
-        "state_sha256",
-        "task_id",
-        "valid_label",
-        "validity_label",
-        "workflow_nodes",
-    }
-)
-
-
-def _strip_internal(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {
-            str(key): _strip_internal(item)
-            for key, item in value.items()
-            if str(key) not in _INTERNAL_POLICY_KEYS
-        }
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [_strip_internal(item) for item in value]
-    return value
-
-
-def _public_observation(value: Mapping[str, Any] | Any) -> dict[str, Any]:
-    raw = stable_mapping(value, name="observation")
-    canonical = any(field in raw for field in _PUBLIC_OBSERVATION_FIELDS)
-    if not canonical:
-        # Backend-neutral callers may provide an already-public state object
-        # rather than the canonical Observation DTO.
-        return stable_mapping({"visible_state": _strip_internal(raw)}, name="public observation")
-    public = {
-        field: _strip_internal(raw[field]) for field in _PUBLIC_OBSERVATION_FIELDS if field in raw
-    }
-    return stable_mapping(public, name="public observation")
-
-
-def _public_candidate(value: Mapping[str, Any] | Any, *, name: str) -> dict[str, Any]:
-    raw = stable_mapping(value, name=name)
-    nested = raw.get("tool_call")
-    source = nested if isinstance(nested, Mapping) else raw
-    tool_name = source.get("tool_name", source.get("name"))
-    if not isinstance(tool_name, str) or not tool_name:
-        raise BackendContractError(f"{name} must contain a tool name")
-    public: dict[str, Any] = {"tool_name": tool_name}
-    arguments = source.get("arguments", source.get("parameters"))
-    if arguments is not None:
-        if not isinstance(arguments, Mapping):
-            raise BackendContractError(f"{name} arguments must be a JSON object")
-        public["arguments"] = _strip_internal(arguments)
-    return stable_mapping(public, name=f"public {name}")
+from agentic_tool_rl.policy_input import PolicyInput
 
 
 @dataclass(frozen=True)
@@ -121,7 +44,7 @@ class QwenRuntime(Protocol):
 
 
 class QwenAdapter(PolicyBackend):
-    """Translate environment state/candidates to and from a Qwen runtime."""
+    """Translate one canonical ``PolicyInput`` to and from a Qwen runtime."""
 
     def __init__(self, runtime: QwenRuntime) -> None:
         if not isinstance(runtime, QwenRuntime):
@@ -162,33 +85,27 @@ class QwenAdapter(PolicyBackend):
         )
         return cls(runtime)
 
-    def encode(
-        self, observation: Mapping[str, Any] | Any, candidates: Sequence[Mapping[str, Any] | Any]
-    ) -> EncodedPolicyInput:
-        observation_json = _public_observation(observation)
-        candidate_json = tuple(
-            _public_candidate(candidate, name=f"candidates[{index}]")
-            for index, candidate in enumerate(candidates)
-        )
-        if not candidate_json:
-            raise BackendContractError("at least one candidate action is required")
+    def encode(self, policy_input: PolicyInput) -> EncodedPolicyInput:
+        if not isinstance(policy_input, PolicyInput):
+            raise TypeError("QwenAdapter.encode accepts only PolicyInput")
+        canonical = policy_input.canonical_bytes().decode("utf-8")
         prompt = (
-            "You are a structured tool-calling policy. Use only visible observation fields "
-            "and choose exactly one candidate tool. Return one JSON object and no prose: "
+            "You are a structured tool-calling policy. Use only POLICY_INPUT and choose "
+            "exactly one candidate whose action_mask permits it. Return one JSON object and "
+            "no prose: "
             '{"tool_name":"...","arguments":{...}}.\n'
-            f"OBSERVATION={json.dumps(observation_json, ensure_ascii=False, sort_keys=True)}\n"
-            f"CANDIDATES={json.dumps(candidate_json, ensure_ascii=False, sort_keys=True)}"
+            f"POLICY_INPUT_SHA256={policy_input.sha256()}\n"
+            f"POLICY_INPUT={canonical}"
         )
-        return EncodedPolicyInput(prompt, observation_json, candidate_json)
+        return EncodedPolicyInput(prompt, policy_input)
 
     def act(
         self,
-        observation: Mapping[str, Any] | Any,
-        candidates: Sequence[Mapping[str, Any] | Any],
+        policy_input: PolicyInput,
         *,
         deterministic: bool = False,
     ) -> PolicyOutput:
-        encoded = self.encode(observation, candidates)
+        encoded = self.encode(policy_input)
         generated = self.runtime.generate(encoded.prompt, deterministic=deterministic)
         if not isinstance(generated, GenerationResult):
             raise BackendContractError(
@@ -196,6 +113,8 @@ class QwenAdapter(PolicyBackend):
             )
         tool_call = parse_tool_call(generated.text)
         action_index = match_candidate(tool_call, encoded.candidates)
+        if not policy_input.candidates[action_index].action_mask:
+            raise BackendContractError("generated tool call selects a masked candidate")
         return PolicyOutput(
             action_index=action_index,
             tool_call=tool_call,
@@ -203,6 +122,44 @@ class QwenAdapter(PolicyBackend):
             value=generated.value,
             raw_output=generated.text,
         )
+
+    def encode_legacy(
+        self,
+        observation: Any,
+        candidates: Sequence[Any],
+        *,
+        action_mask: Sequence[bool],
+        tool_schemas: Sequence[Any],
+    ) -> EncodedPolicyInput:
+        """Explicit migration adapter for callers that still hold four components."""
+
+        return self.encode(
+            PolicyInput.from_decision(
+                observation,
+                candidates,
+                action_mask,
+                tool_schemas,
+            )
+        )
+
+    def act_legacy(
+        self,
+        observation: Any,
+        candidates: Sequence[Any],
+        *,
+        action_mask: Sequence[bool],
+        tool_schemas: Sequence[Any],
+        deterministic: bool = False,
+    ) -> PolicyOutput:
+        """Explicit compatibility entry; normal execution must call ``act(PolicyInput)``."""
+
+        policy_input = PolicyInput.from_decision(
+            observation,
+            candidates,
+            action_mask,
+            tool_schemas,
+        )
+        return self.act(policy_input, deterministic=deterministic)
 
 
 def _json_objects(text: str) -> Sequence[Mapping[str, Any]]:
