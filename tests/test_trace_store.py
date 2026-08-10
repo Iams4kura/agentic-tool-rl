@@ -13,7 +13,7 @@ import pytest
 
 import agentic_tool_rl.evaluation.trace_store as trace_store_module
 from agentic_tool_rl.evaluation.io import canonical_json
-from agentic_tool_rl.evaluation.trace_store import TraceStore
+from agentic_tool_rl.evaluation.trace_store import TraceConflictError, TraceStore
 
 _PROCESS_START_TIMEOUT_S = 30
 _WRITER_RELEASE_TIMEOUT_S = 60
@@ -111,6 +111,26 @@ def test_two_instances_incrementally_absorb_each_others_appends(tmp_path: Path) 
     assert path.read_bytes() == b"".join(
         f"{canonical_json(record)}\n".encode() for record in records
     )
+
+
+def test_records_returns_deeply_isolated_snapshots(tmp_path: Path) -> None:
+    path = tmp_path / "isolated.jsonl"
+    store = TraceStore(path)
+    original = _record("case-1", nested={"score": 1})
+    changed = _record("case-1", nested={"score": 2})
+
+    assert store.append(original)
+
+    exported = store.records()
+    nested = exported[0]["nested"]
+    assert isinstance(nested, dict)
+    nested["score"] = 2
+
+    assert store.records() == [original]
+    assert store.append(original) is False
+    with pytest.raises(TraceConflictError):
+        store.append(changed)
+    assert path.read_bytes() == f"{canonical_json(original)}\n".encode()
 
 
 @pytest.mark.skipif(

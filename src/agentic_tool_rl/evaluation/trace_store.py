@@ -7,6 +7,7 @@ import json
 import os
 import threading
 from collections.abc import Collection, Iterable, Mapping
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -204,7 +205,7 @@ class TraceStore:
             raise KeyError(f"case_id {case_id!r} is not in the trace store") from exc
 
     def records(self) -> list[dict[str, Any]]:
-        return [dict(value) for value in self._records.values()]
+        return [deepcopy(value) for value in self._records.values()]
 
     def append(self, record: Mapping[str, Any]) -> bool:
         """Append once; return False for an identical already-complete case."""
