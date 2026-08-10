@@ -13,7 +13,7 @@ FULL_BENCHMARK_DIR ?= artifacts/benchmark-v1
 FULL_OUTPUT_DIR ?= artifacts/runs/full
 BUILD_CONSTRAINTS ?= build-constraints.txt
 
-.PHONY: help lock-check sync lint typecheck test check package-check verify-smoke smoke qwen-test qwen-dry-run qwen-check ci benchmark full-benchmark
+.PHONY: help lock-check sync lint typecheck test check package-check verify-smoke verify-smoke-structure verify-semantic smoke qwen-test qwen-dry-run qwen-check ci benchmark full-benchmark
 
 help:
 	@printf '%s\n' \
@@ -24,7 +24,8 @@ help:
 		'test            Run the pytest suite' \
 		'check           Run lint, typecheck, and tests' \
 		'package-check   Rebuild and inspect reproducible wheel/sdist artifacts' \
-		'verify-smoke    Run the lightweight end-to-end acceptance loop' \
+		'verify-smoke    Run structural smoke plus deterministic semantic canary' \
+		'verify-semantic Run the deterministic learner semantic canary' \
 		'qwen-dry-run    Validate Qwen/LoRA GPU configuration without model access' \
 		'qwen-check      Run the optional Qwen adapter test surface' \
 		'ci              Run the same lightweight acceptance surface as CI' \
@@ -52,17 +53,20 @@ package-check:
 		--uv $(UV) \
 		--build-constraints $(BUILD_CONSTRAINTS)
 
-verify-smoke:
+verify-smoke: verify-smoke-structure verify-semantic
+
+verify-smoke-structure:
 	$(UV) run --locked agentic-tool-rl smoke \
-		--config $(SMOKE_CONFIG) \
-		--ablation $(ABLATION_CONFIG) \
 		--benchmark-dir $(SMOKE_BENCHMARK_DIR) \
 		--output $(SMOKE_OUTPUT_DIR)
+
+verify-semantic:
+	$(UV) run --locked agentic-tool-rl semantic-canary
 
 smoke: verify-smoke
 
 qwen-dry-run:
-	$(UV) run --locked agentic-tool-rl qwen-dry-run --config $(QWEN_CONFIG)
+	$(UV) run --locked agentic-tool-rl qwen-dry-run
 
 qwen-test:
 	$(UV) run --locked pytest -o addopts="-ra --strict-markers" -m qwen

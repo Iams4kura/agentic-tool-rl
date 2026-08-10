@@ -1,0 +1,61 @@
+{
+  "artifact_gate_requires_positive_claim": false,
+  "baselines": [
+    "O-oracle-shortest-path",
+    "R0-masked-random-v1",
+    "R1-public-ready-greedy-v1",
+    "R2-public-dag-greedy-v1",
+    "R3-goal-schema-overlap-v1",
+    "R4-reviewer-composite-shortcut-v1",
+    "R5-source-aware-family-stage-v1",
+    "R6-public-downstream-centrality-v1"
+  ],
+  "canonical_final_permitted": false,
+  "development_base_seed": 20260810,
+  "canonical_matrix": {
+    "runs": 30,
+    "seeds": 10,
+    "variants": [
+      "B-multi-positive-bc-mask",
+      "D-action-ppo-sparse-mask",
+      "E-action-ppo-corrected-progress-mask"
+    ]
+  },
+  "claim_gate": {
+    "bootstrap_samples": 10000,
+    "claim_confidence": 0.975,
+    "comparisons": [
+      "D-B",
+      "E-D"
+    ],
+    "minimum_effect_tsr": 0.02
+  },
+  "dataset": {
+    "dev": {
+      "cases": 400,
+      "groups": 100
+    },
+    "goals_per_group": 4,
+    "test": {
+      "cases": 1000,
+      "groups": 250
+    },
+    "train": {
+      "cases": 2000,
+      "groups": 500
+    }
+  },
+  "external_time_anchor_locked": false,
+  "future_randomness_beacon_locked": false,
+  "generator_version": "benchmark-v1.4.0",
+  "quality_gates": {
+    "minimum_deterministic_shortest_plans_per_case": 4,
+    "minimum_goal_incompatible_state_fraction": 0.8,
+    "minimum_multi_positive_expert_state_fraction": 0.2,
+    "oracle_tsr": 1.0,
+    "public_ready_tsr_max": 0.25,
+    "strongest_public_rule_dev_tsr_strict_max": 0.8
+  },
+  "schema_version": "benchmark-v1.4-development-protocol-v1",
+  "status": "development-acceptance"
+}

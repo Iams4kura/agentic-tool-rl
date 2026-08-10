@@ -1,9 +1,9 @@
 """Leakage-resistant feature extraction for the lightweight policy.
 
-The encoder consumes only the observation and grounded candidate calls exposed
-to a policy.  It never reads oracle plans, hidden goal predicates, validity
-labels, or candidate ``call_id`` values (which are evidence identifiers rather
-than policy inputs).
+The canonical path consumes one :class:`PolicyInput`, including the same
+public observation, candidate calls, action mask, and schemas available to
+registered baselines and Qwen.  It never receives oracle plans, hidden goal
+predicates, validity labels, or candidate ``call_id`` evidence identifiers.
 """
 
 from __future__ import annotations
@@ -18,7 +18,8 @@ from typing import Any
 import torch
 from torch import Tensor
 
-from agentic_tool_rl.contracts import Observation, ToolCall
+from agentic_tool_rl.contracts import Observation, ToolCall, ToolSchema
+from agentic_tool_rl.policy_input import PolicyInput, PublicToolCall, PublicToolSchema
 
 _TOKEN_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
 _OPAQUE_OPERATION_PATTERN = re.compile(r"\bop_[0-9a-f]{20}\b", re.IGNORECASE)
@@ -138,8 +139,10 @@ def _deidentified_message(data: Mapping[str, Any]) -> str:
     return _OPAQUE_OPERATION_PATTERN.sub("<operation>", message)
 
 
-def _tool_call(call: ToolCall | Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
-    if isinstance(call, ToolCall):
+def _tool_call(
+    call: ToolCall | PublicToolCall | Mapping[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    if isinstance(call, (ToolCall, PublicToolCall)):
         return call.tool_name, dict(call.arguments)
     nested = call.get("tool_call")
     source = nested if isinstance(nested, Mapping) else call
@@ -150,11 +153,20 @@ def _tool_call(call: ToolCall | Mapping[str, Any]) -> tuple[str, dict[str, Any]]
     return name, dict(arguments)
 
 
+def _schema_mapping(
+    schema: ToolSchema | PublicToolSchema | Mapping[str, Any],
+) -> dict[str, Any]:
+    if isinstance(schema, (ToolSchema, PublicToolSchema)):
+        return schema.model_dump(mode="json")
+    return dict(schema)
+
+
 @dataclass(frozen=True)
 class DecisionFeatures:
     state: Tensor
     actions: Tensor
     mask: Tensor
+    policy_input_sha256: str | None = None
 
     def as_batch(self) -> tuple[Tensor, Tensor, Tensor]:
         return self.state.unsqueeze(0), self.actions.unsqueeze(0), self.mask.unsqueeze(0)
@@ -224,40 +236,125 @@ class FeatureEncoder:
             )
         return vector
 
-    def encode_action(self, call: ToolCall | Mapping[str, Any]) -> Tensor:
+    def encode_action(
+        self,
+        call: ToolCall | PublicToolCall | Mapping[str, Any],
+        *,
+        schema: ToolSchema | PublicToolSchema | Mapping[str, Any] | None = None,
+    ) -> Tensor:
+        """Encode an action, including its public schema when one is supplied.
+
+        The schema-less form is retained as an explicitly lower-information
+        compatibility path.  Policy execution uses :meth:`encode_policy_input`
+        so descriptions, safety flags, and public DAG prerequisites are not
+        available only to heuristic baselines.
+        """
+
         tool_name, arguments = _tool_call(call)
         vector = torch.zeros(self.action_dim, dtype=torch.float32)
         expected_version = arguments.get("expected_version")
         if isinstance(expected_version, int) and not isinstance(expected_version, bool):
             vector[0] = expected_version / 15.0
-        vector[2] = float("entity_id" in arguments)
-        vector[3] = float("operation_id" in arguments)
-        vector[4] = float("expected_version" in arguments)
-        vector[5] = float(bool(arguments.get("approval_token")))
-        vector[6] = float(bool(arguments.get("idempotency_key")))
-        safe = {
-            "tool_name": tool_name,
-            "argument_keys": sorted(key for key in arguments if key not in _INTERNAL_POLICY_FIELDS),
-        }
+        if schema is None:
+            vector[2] = float("entity_id" in arguments)
+            vector[3] = float("operation_id" in arguments)
+            vector[4] = float("expected_version" in arguments)
+            vector[5] = float(bool(arguments.get("approval_token")))
+            vector[6] = float(bool(arguments.get("idempotency_key")))
+            safe: dict[str, Any] = {
+                "tool_name": tool_name,
+                "argument_keys": sorted(
+                    key for key in arguments if key not in _INTERNAL_POLICY_FIELDS
+                ),
+            }
+            operation_ids = [arguments.get("operation_id")]
+        else:
+            schema_data = _schema_mapping(schema)
+            required_predecessors = schema_data.get("required_completed_operations", [])
+            if not isinstance(required_predecessors, Sequence) or isinstance(
+                required_predecessors, (str, bytes, bytearray)
+            ):
+                raise ValueError("schema.required_completed_operations must be a sequence")
+            predecessor_ids = [
+                value for value in required_predecessors if isinstance(value, str)
+            ]
+            vector[2] = float(bool(schema_data.get("mutating", True)))
+            vector[3] = float(bool(schema_data.get("idempotent", True)))
+            vector[4] = float(bool(schema_data.get("policy_allowed", True)))
+            vector[5] = float(bool(schema_data.get("additional_properties", False)))
+            vector[6] = min(len(predecessor_ids), 15) / 15.0
+            vector[7] = float(schema_data.get("side_effect") is not None)
+            safe = {
+                "tool_name": tool_name,
+                "argument_keys": sorted(
+                    key for key in arguments if key not in _INTERNAL_POLICY_FIELDS
+                ),
+                "schema_name": schema_data.get("name"),
+                "schema_description": schema_data.get("description"),
+                "required_arguments": schema_data.get("required_arguments", {}),
+                "optional_arguments": schema_data.get("optional_arguments", {}),
+                "additional_properties": schema_data.get("additional_properties", False),
+                "mutating": schema_data.get("mutating", True),
+                "idempotent": schema_data.get("idempotent", True),
+                "policy_allowed": schema_data.get("policy_allowed", True),
+                "side_effect": schema_data.get("side_effect"),
+                "required_predecessor_count": len(predecessor_ids),
+            }
+            operation_ids = [schema_data.get("operation_id"), *predecessor_ids]
         _hashed_add(
             vector,
             _tokens(safe),
             start=8,
             end=vector.numel() - self.operation_buckets,
         )
-        operation_id = arguments.get("operation_id")
-        if isinstance(operation_id, str):
+        public_operation_ids = [value for value in operation_ids if isinstance(value, str)]
+        if public_operation_ids:
             _hashed_operations_add(
                 vector,
-                [operation_id],
+                public_operation_ids,
                 buckets=self.operation_buckets,
             )
         return vector
 
+    def encode_policy_input(
+        self,
+        policy_input: PolicyInput,
+        *,
+        selection_mask: Sequence[bool] | None = None,
+    ) -> DecisionFeatures:
+        """Encode the canonical public DTO used by every policy decision."""
+
+        if not isinstance(policy_input, PolicyInput):
+            raise TypeError("encode_policy_input accepts only PolicyInput")
+        public_mask = [candidate.action_mask for candidate in policy_input.candidates]
+        resolved_mask = list(selection_mask) if selection_mask is not None else public_mask
+        if len(resolved_mask) != len(policy_input.candidates):
+            raise ValueError("selection_mask and PolicyInput candidates must have equal length")
+        if any(not isinstance(value, bool) for value in resolved_mask):
+            raise TypeError("selection_mask entries must be bool")
+        if not any(resolved_mask):
+            raise ValueError("at least one candidate must be selectable")
+
+        observation = policy_input.observation.model_dump(mode="json")
+        calls = [candidate.tool_call for candidate in policy_input.candidates]
+        actions = torch.stack(
+            [
+                self.encode_action(candidate.tool_call, schema=candidate.tool_schema)
+                for candidate in policy_input.candidates
+            ]
+        )
+        self._encode_grounding_relation(observation, calls, actions)
+        return DecisionFeatures(
+            state=self.encode_state(observation),
+            actions=actions,
+            mask=torch.tensor(resolved_mask, dtype=torch.bool),
+            policy_input_sha256=policy_input.sha256(),
+        )
+
     def encode_decision(
         self,
         observation: Observation | Mapping[str, Any],
-        candidates: Sequence[ToolCall | Mapping[str, Any]],
+        candidates: Sequence[ToolCall | PublicToolCall | Mapping[str, Any]],
         mask: Sequence[bool] | None = None,
     ) -> DecisionFeatures:
         if not candidates:
@@ -268,6 +365,19 @@ class FeatureEncoder:
         if not any(resolved_mask):
             raise ValueError("at least one candidate must be selectable")
         actions = torch.stack([self.encode_action(candidate) for candidate in candidates])
+        self._encode_grounding_relation(observation, candidates, actions)
+        return DecisionFeatures(
+            state=self.encode_state(observation),
+            actions=actions,
+            mask=torch.tensor(resolved_mask, dtype=torch.bool),
+        )
+
+    def _encode_grounding_relation(
+        self,
+        observation: Observation | Mapping[str, Any],
+        candidates: Sequence[ToolCall | PublicToolCall | Mapping[str, Any]],
+        actions: Tensor,
+    ) -> None:
         # Entity grounding is a public relation, not an instance identity. The
         # standalone action encoder deliberately omits raw entity IDs; at the
         # decision boundary we can still expose whether each candidate refers
@@ -294,19 +404,16 @@ class FeatureEncoder:
             actions[index, 1] = float(
                 isinstance(entity_id, str) and entity_id in available_entities
             )
-        return DecisionFeatures(
-            state=self.encode_state(observation),
-            actions=actions,
-            mask=torch.tensor(resolved_mask, dtype=torch.bool),
-        )
 
     def fingerprint(self) -> str:
         payload = json.dumps(
             {
-                "version": 4,
+                "version": 5,
                 "state_dim": self.state_dim,
                 "action_dim": self.action_dim,
                 "operation_buckets": self.operation_buckets,
+                "policy_input_schema": "policy-input-v1",
+                "schema_action_features": 1,
             },
             sort_keys=True,
         )

@@ -9,6 +9,8 @@ from dataclasses import asdict, dataclass, is_dataclass
 from math import isfinite
 from typing import Any
 
+from agentic_tool_rl.policy_input import PolicyInput
+
 
 class BackendContractError(ValueError):
     """A policy backend returned an unsafe or incomplete structured action."""
@@ -32,11 +34,29 @@ def to_jsonable(value: Any) -> Any:
 
 @dataclass(frozen=True)
 class EncodedPolicyInput:
-    """Stable representation passed from an adapter to its runtime."""
+    """Runtime representation derived from exactly one canonical PolicyInput."""
 
     prompt: str
-    observation: Mapping[str, Any]
-    candidates: tuple[Mapping[str, Any], ...]
+    policy_input: PolicyInput
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.policy_input, PolicyInput):
+            raise TypeError("EncodedPolicyInput requires PolicyInput")
+
+    @property
+    def policy_input_sha256(self) -> str:
+        return self.policy_input.sha256()
+
+    @property
+    def observation(self) -> Mapping[str, Any]:
+        return self.policy_input.observation.model_dump(mode="json")
+
+    @property
+    def candidates(self) -> tuple[Mapping[str, Any], ...]:
+        return tuple(
+            candidate.tool_call.model_dump(mode="json")
+            for candidate in self.policy_input.candidates
+        )
 
 
 @dataclass(frozen=True)
@@ -75,16 +95,13 @@ class PolicyBackend(ABC):
     """Common contract shared by lightweight and optional LLM policies."""
 
     @abstractmethod
-    def encode(
-        self, observation: Mapping[str, Any] | Any, candidates: Sequence[Mapping[str, Any] | Any]
-    ) -> EncodedPolicyInput:
-        """Encode visible state and executable candidates without hidden labels."""
+    def encode(self, policy_input: PolicyInput) -> EncodedPolicyInput:
+        """Encode the canonical public decision DTO for a backend runtime."""
 
     @abstractmethod
     def act(
         self,
-        observation: Mapping[str, Any] | Any,
-        candidates: Sequence[Mapping[str, Any] | Any],
+        policy_input: PolicyInput,
         *,
         deterministic: bool = False,
     ) -> PolicyOutput:
