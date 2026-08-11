@@ -219,6 +219,25 @@ def test_manifest_records_hashes_counts_strata_and_oracle_status(tmp_path: Path)
         assert load_tasks_jsonl(path) == sorted(tasks, key=lambda task: task.case_id)
 
 
+def test_write_benchmark_preserves_existing_bundle_when_late_oracle_fails(
+    tmp_path: Path,
+) -> None:
+    original = generate_all_splits(train_size=1, dev_size=1, test_size=1, base_seed=701)
+    write_benchmark(tmp_path, original, base_seed=701)
+    artifact_names = ("train.jsonl", "dev.jsonl", "test.jsonl", "manifest.json")
+    original_bytes = {name: (tmp_path / name).read_bytes() for name in artifact_names}
+
+    replacement = generate_all_splits(train_size=1, dev_size=1, test_size=1, base_seed=702)
+    replacement_test = list(replacement[Split.TEST])
+    replacement_test[0] = replacement_test[0].model_copy(update={"oracle_plans": [[]]})
+    replacement[Split.TEST] = replacement_test
+
+    with pytest.raises(ValueError, match="unsolvable generated task"):
+        write_benchmark(tmp_path, replacement, base_seed=702)
+
+    assert {name: (tmp_path / name).read_bytes() for name in artifact_names} == original_bytes
+
+
 def test_contract_round_trip_is_lossless() -> None:
     task = generate_tasks(Split.DEV, 1)[0]
     payload = task.model_dump_json()

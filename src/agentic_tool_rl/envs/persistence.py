@@ -170,16 +170,12 @@ def write_benchmark(
 ) -> BenchmarkManifest:
     """Persist split JSONL files and a deterministic integrity manifest."""
 
-    directory = Path(output_dir)
-    directory.mkdir(parents=True, exist_ok=True)
-    files: dict[str, BenchmarkFile] = {}
+    prepared_splits: list[tuple[Split, list[WorkflowTask], int]] = []
     for split_like, task_sequence in splits.items():
         split = split_like if isinstance(split_like, Split) else Split(split_like)
         tasks = list(task_sequence)
         if any(task.split != split for task in tasks):
             raise ValueError(f"task split mismatch while writing {split.value}")
-        path = directory / f"{split.value}.jsonl"
-        digest = save_tasks_jsonl(tasks, path)
         solvable = 0
         if verify_oracles:
             reports = [verify_task_solvable(task) for task in tasks]
@@ -189,6 +185,14 @@ def write_benchmark(
                     f"unsolvable generated task: {failed[0].case_id}: {failed[0].reason}"
                 )
             solvable = len(reports)
+        prepared_splits.append((split, tasks, solvable))
+
+    directory = Path(output_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    files: dict[str, BenchmarkFile] = {}
+    for split, tasks, solvable in prepared_splits:
+        path = directory / f"{split.value}.jsonl"
+        digest = save_tasks_jsonl(tasks, path)
         family_counts = Counter(task.family for task in tasks)
         length_counts = Counter(task.difficulty for task in tasks)
         files[split.value] = BenchmarkFile(
