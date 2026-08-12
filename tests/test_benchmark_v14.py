@@ -3,6 +3,9 @@ from __future__ import annotations
 import re
 from collections import Counter
 from itertools import combinations
+from pathlib import Path
+
+import pytest
 
 from agentic_tool_rl.contracts import Split
 from agentic_tool_rl.envs.benchmark import generate_tasks
@@ -21,6 +24,7 @@ from agentic_tool_rl.envs.benchmark_v14 import (
     validate_counterfactual_groups,
 )
 from agentic_tool_rl.envs.oracle import verify_task_solvable
+from agentic_tool_rl.envs.persistence_v14 import write_benchmark_v14
 
 
 def test_v13_contract_shape_remains_frozen() -> None:
@@ -84,6 +88,38 @@ def test_v14_generator_is_deterministic_and_split_isolated() -> None:
         Split.DEV: 40,
         Split.TEST: 40,
     }
+
+
+def test_write_benchmark_v14_preserves_existing_bundle_when_late_validation_fails(
+    tmp_path: Path,
+) -> None:
+    original = generate_all_splits_v14(
+        train_groups=1,
+        dev_groups=1,
+        test_groups=1,
+        base_seed=701,
+    )
+    write_benchmark_v14(tmp_path, original, base_seed=701)
+    artifact_names = ("train.jsonl", "dev.jsonl", "test.jsonl", "manifest.json")
+    original_bytes = {name: (tmp_path / name).read_bytes() for name in artifact_names}
+
+    replacement = generate_all_splits_v14(
+        train_groups=1,
+        dev_groups=1,
+        test_groups=1,
+        base_seed=702,
+    )
+    invalid_test_task = replacement[Split.TEST][0]
+    replacement[Split.TEST][0] = invalid_test_task.model_copy(
+        update={"oracle_plans": [[], *invalid_test_task.oracle_plans[1:]]}
+    )
+
+    with pytest.raises(ValueError, match="oracle plan 0 failed"):
+        write_benchmark_v14(tmp_path, replacement, base_seed=702)
+
+    assert {
+        name: (tmp_path / name).read_bytes() for name in artifact_names
+    } == original_bytes
 
 
 def test_v14_semantic_lanes_are_isomorphic_and_target_disjoint() -> None:

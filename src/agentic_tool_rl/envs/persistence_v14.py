@@ -11,6 +11,7 @@ from agentic_tool_rl.contracts import CounterfactualWorkflowTask, Split
 from agentic_tool_rl.envs.benchmark_v14 import (
     DEVELOPMENT_BASE_SEED_V14,
     GENERATOR_VERSION_V14,
+    CounterfactualGateReport,
     assert_v14_splits_disjoint,
     generate_all_splits_v14,
     validate_counterfactual_groups,
@@ -109,14 +110,20 @@ def write_benchmark_v14(
     assert_v14_splits_disjoint(splits)
     if set(splits) != {Split.TRAIN, Split.DEV, Split.TEST}:
         raise ValueError("v1.4 artifact requires train, dev, and test splits")
-    directory = Path(output_dir)
-    files: dict[str, dict[str, Any]] = {}
-    protocol_counts: dict[str, dict[str, int]] = {}
+    prepared_splits: list[
+        tuple[Split, list[CounterfactualWorkflowTask], CounterfactualGateReport]
+    ] = []
     for split in (Split.TRAIN, Split.DEV, Split.TEST):
         tasks = list(splits[split])
         if any(task.split != split for task in tasks):
             raise ValueError(f"task split mismatch while writing {split.value}")
         gate = validate_counterfactual_groups(tasks)
+        prepared_splits.append((split, tasks, gate))
+
+    directory = Path(output_dir)
+    files: dict[str, dict[str, Any]] = {}
+    protocol_counts: dict[str, dict[str, int]] = {}
+    for split, tasks, gate in prepared_splits:
         path = directory / f"{split.value}.jsonl"
         digest = save_tasks_jsonl(tasks, path)
         representatives = {
