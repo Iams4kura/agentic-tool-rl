@@ -133,6 +133,76 @@ def test_records_returns_deeply_isolated_snapshots(tmp_path: Path) -> None:
     assert path.read_bytes() == f"{canonical_json(original)}\n".encode()
 
 
+def test_records_is_stable_during_concurrent_append(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "concurrent-snapshot.jsonl"
+    store = TraceStore(path)
+    original = [_record("case-1", value=1), _record("case-2", value=2)]
+    appended = _record("case-3", value=3)
+    for record in original:
+        assert store.append(record)
+
+    snapshot_started = threading.Event()
+    release_snapshot = threading.Event()
+    append_started = threading.Event()
+    append_finished = threading.Event()
+    reader_result: Queue[tuple[str, object]] = Queue()
+    writer_result: Queue[tuple[str, object]] = Queue()
+    real_deepcopy = trace_store_module.deepcopy
+    first_copy = True
+
+    def pause_first_copy(value: Any) -> Any:
+        nonlocal first_copy
+        if first_copy:
+            first_copy = False
+            snapshot_started.set()
+            if not release_snapshot.wait(_PROCESS_START_TIMEOUT_S):
+                raise TimeoutError("snapshot test did not release the reader")
+        return real_deepcopy(value)
+
+    monkeypatch.setattr(trace_store_module, "deepcopy", pause_first_copy)
+
+    def read_records() -> None:
+        try:
+            reader_result.put(("ok", store.records()))
+        except Exception as exc:  # pragma: no cover - asserted below
+            reader_result.put(("error", repr(exc)))
+
+    def append_record() -> None:
+        append_started.set()
+        try:
+            writer_result.put(("ok", store.append(appended)))
+        except Exception as exc:  # pragma: no cover - asserted below
+            writer_result.put(("error", repr(exc)))
+        finally:
+            append_finished.set()
+
+    reader = threading.Thread(target=read_records, daemon=True)
+    writer = threading.Thread(target=append_record, daemon=True)
+    writer_was_started = False
+    reader.start()
+    try:
+        assert snapshot_started.wait(_PROCESS_START_TIMEOUT_S)
+        writer.start()
+        writer_was_started = True
+        assert append_started.wait(_PROCESS_START_TIMEOUT_S)
+        assert append_finished.wait(_PROCESS_START_TIMEOUT_S), (
+            "append remained blocked after records() captured its snapshot"
+        )
+    finally:
+        release_snapshot.set()
+        reader.join(_PROCESS_START_TIMEOUT_S)
+        if writer_was_started:
+            writer.join(_PROCESS_START_TIMEOUT_S)
+
+    assert not reader.is_alive()
+    assert not writer.is_alive()
+    assert reader_result.get(timeout=2) == ("ok", original)
+    assert writer_result.get(timeout=2) == ("ok", True)
+    assert store.records() == [*original, appended]
+
+
 @pytest.mark.skipif(
     getattr(trace_store_module, "fcntl", None) is None,
     reason="cross-process trace locking requires fcntl",
