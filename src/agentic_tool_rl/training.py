@@ -1631,7 +1631,7 @@ def save_checkpoint(
         "feature_fingerprint": encoder.fingerprint(),
         "model_state_dict": model.state_dict(),
         "progress_state_dict": estimator.state_dict(),
-        "progress_hidden_dim": 64,
+        "progress_hidden_dim": estimator.hidden_dim,
         "metadata": dict(metadata),
     }
     temporary: Path | None = None
