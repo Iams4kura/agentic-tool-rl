@@ -151,7 +151,7 @@ ablate 在训练前强制：
 - successful_conditional_simulated_service_time_s；
 - timeout_penalized_simulated_cost_s。
 
-规则型 ActionMask 的 valid/invalid recall、BAcc、macro-F1、混淆矩阵和分层 recall 不从策略 trace 计算，也不进入任何 A–F 变体的 metrics.json。它们只对冻结 action-validity-v2 全局计算一次，写入 artifacts/benchmark-v1/action_validity.metrics.json；canonical claim 引用其中的全局 BAcc。
+规则型 ActionMask 的 valid/invalid recall、BAcc、macro-F1、混淆矩阵和分层 recall 不从策略 trace 计算，也不进入任何 A–F 变体的 metrics.json。它们只对冻结 action-validity-v2 全局计算一次，直接写入当前 run bundle 的 benchmark/action_validity.metrics.json，不修改共享 benchmark；canonical claim 引用其中的全局 BAcc。
 
 两个 service-time 字段必须全名展示：
 
@@ -207,8 +207,7 @@ artifacts/benchmark-v1/
 ├── dev.jsonl
 ├── test.jsonl
 ├── action_validity.jsonl
-├── action_validity.manifest.json
-└── action_validity.metrics.json
+└── action_validity.manifest.json
 
 artifacts/runs/full/<run-id>/
 ├── run-manifest.json

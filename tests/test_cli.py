@@ -613,6 +613,9 @@ def test_smoke_runs_real_lightweight_loop_and_verify_run_accepts_it(
     )
     benchmark_dir = tmp_path / "benchmark"
     output_dir = tmp_path / "runs"
+    legacy_metrics = b'{"legacy_source_metrics":true}\n'
+    benchmark_dir.mkdir()
+    (benchmark_dir / "action_validity.metrics.json").write_bytes(legacy_metrics)
 
     smoke = RUNNER.invoke(
         app,
@@ -630,6 +633,7 @@ def test_smoke_runs_real_lightweight_loop_and_verify_run_accepts_it(
     )
 
     assert smoke.exit_code == 0, smoke.output
+    assert (benchmark_dir / "action_validity.metrics.json").read_bytes() == legacy_metrics
     payload = _json_output(smoke.stdout)
     verification = payload["verification"]
     experiment = payload["experiment"]
@@ -650,6 +654,7 @@ def test_smoke_runs_real_lightweight_loop_and_verify_run_accepts_it(
     assert not (run_root / "claim-check.json").exists()
     bundled_benchmark = _experiment_artifact_path(experiment, experiment["benchmark_dir"])
     assert bundled_benchmark == run_root / "benchmark"
+    assert (bundled_benchmark / "action_validity.metrics.json").is_file()
     run_by_variant = {run["variant"]: run for run in experiment["runs"]}
     assert run_by_variant["B-BC-Mask"]["ppo_updates"] == 0
     assert run_by_variant["B-BC-Mask"]["parameter_l2_delta"] == 0.0

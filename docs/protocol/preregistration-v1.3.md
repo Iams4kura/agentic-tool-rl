@@ -63,6 +63,8 @@ seed-lock 后，在 final run 完成前禁止修改 `src/**/*.py`、`configs/*.y
 
 Action Mask 分类指标是独立的 benchmark 级全局证据：对冻结 `action-validity-v2` 只计算一次 BAcc、valid/invalid recall、macro-F1、混淆矩阵与分层 recall，并写入 `artifacts/benchmark-v1/action_validity.metrics.json`。这些字段不进入任何 A–F 策略运行的 `metrics.json`；canonical report 仅引用其中的全局 BAcc。
 
+> 以上路径记录 v1.3 final 的历史执行协议。当前 main 将同一派生指标直接写入 run bundle 的 `benchmark/action_validity.metrics.json`，避免后续运行改写共享的冻结 benchmark 目录；历史 tag 与已发布证据不变。
+
 Primary E-vs-B TSR 差值严格按相同 `(seed, case_id)` 配对，并同时对 seed 和完整 case cluster 有放回重采样；使用 1000 次重复、95% percentile CI 和固定 bootstrap seed。
 
 这里的两个时间指标都不是 wall-clock、真实网络延迟或线上 SLO；延迟档位来自冻结的 Azure Functions 2019 trace 派生配置。

@@ -80,7 +80,6 @@ _BUNDLED_BENCHMARK_FILES = (
     "manifest.json",
     "action_validity.jsonl",
     "action_validity.manifest.json",
-    "action_validity.metrics.json",
 )
 
 
@@ -433,15 +432,15 @@ def run_experiment_matrix(
             action_validity_invalid_count=action_validity.invalid_count,
             bootstrap_samples=config.evaluation.bootstrap_samples,
         )
-    write_json_atomic(
-        benchmark_path / "action_validity.metrics.json",
-        action_validity.to_dict(include_predictions=False),
-    )
     run_id = _canonical_run_id(config, benchmark_path, selected_seeds, variants)
     root = (Path(output_root) / run_id).resolve()
     root.mkdir(parents=True, exist_ok=True)
     bundled_benchmark_path = root / "benchmark"
     _snapshot_benchmark_bundle(benchmark_path, bundled_benchmark_path)
+    write_json_atomic(
+        bundled_benchmark_path / "action_validity.metrics.json",
+        action_validity.to_dict(include_predictions=False),
+    )
     source_sha256 = source_fingerprint()
     benchmark_sha256 = file_sha256(benchmark_path / "manifest.json")
     write_json_atomic(

@@ -165,7 +165,7 @@ make package-check
 
 ## 指标口径
 
-每个策略 run 的 metrics.json 只包含策略执行结果：TSR（含 family macro 聚合）、invalid_action_rate、forbidden_side_effect_rate、steps_efficiency/mean_steps，以及下面两种模拟 service-time/cost。规则型 ActionMask 的 recall、BAcc、macro-F1 和混淆矩阵不属于任何策略变体；它们对冻结 action-validity-v2 全局计算一次，写入 artifacts/benchmark-v1/action_validity.metrics.json，并快照到 run bundle 的 benchmark/action_validity.metrics.json，由 canonical report 引用其中的全局 BAcc 证据。
+每个策略 run 的 metrics.json 只包含策略执行结果：TSR（含 family macro 聚合）、invalid_action_rate、forbidden_side_effect_rate、steps_efficiency/mean_steps，以及下面两种模拟 service-time/cost。规则型 ActionMask 的 recall、BAcc、macro-F1 和混淆矩阵不属于任何策略变体；它们对冻结 action-validity-v2 全局计算一次，直接写入当前 run bundle 的 benchmark/action_validity.metrics.json，不回写共享 benchmark 目录，由 canonical report 引用其中的全局 BAcc 证据。
 
 发布的 service-time 指标只有两个：
 
