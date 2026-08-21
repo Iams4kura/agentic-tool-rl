@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, m
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
 
 class BenchmarkConfig(StrictModel):
