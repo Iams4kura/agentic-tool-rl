@@ -248,11 +248,120 @@ def test_exact_call_replay_is_idempotent(task) -> None:  # type: ignore[no-untyp
     first = environment.step(call)
     after_first = environment.state_snapshot()
 
-    replay = environment.step(call)
+    reordered = call.model_copy(
+        update={"arguments": dict(reversed(tuple(call.arguments.items())))}
+    )
+    replay = environment.step(reordered)
 
     assert first.accepted and replay.accepted
     assert replay.info["idempotent_replay"] is True
     assert environment.state_snapshot() == after_first
+    audit_entry = environment.state["audit_log"][0]
+    request_sha256 = audit_entry["request_sha256"]
+    assert isinstance(request_sha256, str) and len(request_sha256) == 64
+    assert set(request_sha256) <= set("0123456789abcdef")
+    assert "request" not in audit_entry
+
+
+@pytest.mark.parametrize(
+    "collision_kind",
+    ["different-operation", "different-arguments", "read-only-request"],
+)
+def test_call_id_reuse_requires_the_exact_original_request(task, collision_kind) -> None:  # type: ignore[no-untyped-def]
+    environment = TransactionalWorkflowEnv(task)
+    original = task.oracle_plans[0][0]
+    assert environment.step(original).accepted
+    after_original = environment.state_snapshot()
+
+    if collision_kind == "different-operation":
+        conflicting = task.oracle_plans[0][1].model_copy(
+            update={"call_id": original.call_id}
+        )
+    elif collision_kind == "different-arguments":
+        conflicting = original.model_copy(
+            update={
+                "arguments": {
+                    **original.arguments,
+                    "expected_version": int(original.arguments["expected_version"]) + 1,
+                }
+            }
+        )
+    else:
+        conflicting = next(
+            candidate
+            for candidate in environment.candidate_actions()
+            if candidate.tool_name.endswith(".inspect_status")
+        ).model_copy(update={"call_id": original.call_id})
+
+    label = environment.dry_run(conflicting)
+    outcome = environment.step(conflicting)
+
+    assert not label.valid
+    assert label.invalid_kind == InvalidActionKind.SAFETY
+    assert "call_id" in label.reason
+    assert not outcome.accepted
+    assert outcome.invalid_kind == InvalidActionKind.SAFETY
+    assert environment.state_snapshot() == after_original
+
+
+def test_call_id_request_identity_is_type_sensitive(task) -> None:  # type: ignore[no-untyped-def]
+    original = task.oracle_plans[0][0]
+    schemas = [
+        schema.model_copy(update={"additional_properties": True})
+        if schema.name == original.tool_name
+        else schema
+        for schema in task.tool_schemas
+    ]
+    environment = TransactionalWorkflowEnv(task.model_copy(update={"tool_schemas": schemas}))
+    first = original.model_copy(
+        update={"arguments": {**original.arguments, "metadata": {"flag": True}}}
+    )
+    assert environment.step(first).accepted
+    after_first = environment.state_snapshot()
+    collision = first.model_copy(
+        update={"arguments": {**first.arguments, "metadata": {"flag": 1}}}
+    )
+
+    outcome = environment.step(collision)
+
+    assert not outcome.accepted
+    assert outcome.invalid_kind == InvalidActionKind.SAFETY
+    assert environment.state_snapshot() == after_first
+
+
+def test_non_json_call_id_request_is_rejected_without_mutation(task) -> None:  # type: ignore[no-untyped-def]
+    original = task.oracle_plans[0][0]
+    schemas = [
+        schema.model_copy(update={"additional_properties": True})
+        if schema.name == original.tool_name
+        else schema
+        for schema in task.tool_schemas
+    ]
+    task_with_extras = task.model_copy(update={"tool_schemas": schemas})
+    cyclic: list[object] = []
+    cyclic.append(cyclic)
+    deeply_nested: object = "leaf"
+    for _ in range(2_000):
+        deeply_nested = [deeply_nested]
+
+    for malformed_value in ({1}, cyclic, float("nan"), {1: "bad-key"}, deeply_nested):
+        environment = TransactionalWorkflowEnv(task_with_extras)
+        malformed = original.model_copy(
+            update={
+                "arguments": {
+                    **original.arguments,
+                    "metadata": {"bad": malformed_value},
+                }
+            }
+        )
+        before = environment.state_snapshot()
+
+        outcome = environment.step(malformed)
+
+        assert not outcome.accepted
+        assert outcome.invalid_kind == InvalidActionKind.SCHEMA
+        assert "canonical JSON" in outcome.reason
+        assert environment.state_snapshot() == before
 
 
 def test_mask_allows_legal_but_non_progressing_policy_distractors(task) -> None:  # type: ignore[no-untyped-def]

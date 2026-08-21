@@ -8,8 +8,11 @@ benchmark circular.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from copy import deepcopy
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any
 
 from agentic_tool_rl.contracts import (
@@ -49,6 +52,58 @@ def _matches_json_type(value: object, expected: str) -> bool:
     if expected == "null":
         return value is None
     return False
+
+
+def _validate_json_value(value: Any, *, ancestors: set[int] | None = None) -> None:
+    if value is None or isinstance(value, (bool, int, str)):
+        return
+    if isinstance(value, float):
+        if isfinite(value):
+            return
+        raise ValueError("non-finite number")
+    if not isinstance(value, (list, dict)):
+        raise ValueError(f"unsupported JSON value type: {type(value).__name__}")
+
+    active = set() if ancestors is None else ancestors
+    identity = id(value)
+    if identity in active:
+        raise ValueError("cyclic container")
+    active.add(identity)
+    try:
+        if isinstance(value, list):
+            for item in value:
+                _validate_json_value(item, ancestors=active)
+        else:
+            if any(not isinstance(key, str) for key in value):
+                raise ValueError("object keys must be strings")
+            for item in value.values():
+                _validate_json_value(item, ancestors=active)
+    finally:
+        active.remove(identity)
+
+
+def _request_sha256(call: ToolCall) -> str:
+    """Bind a replay identifier to one type-sensitive canonical JSON request."""
+
+    payload = {
+        "schema_version": "tool-request-identity-v1",
+        "tool_name": call.tool_name,
+        "arguments": call.arguments,
+    }
+    try:
+        _validate_json_value(payload)
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except RecursionError as exc:
+        raise ValueError("request nesting is too deep") from exc
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        raise ValueError("request must contain only finite JSON values") from exc
+    return hashlib.sha256(encoded).hexdigest()
 
 
 class ToolRegistry:
@@ -93,6 +148,39 @@ class ToolRegistry:
                 reason=schema_error,
             )
 
+        try:
+            request_sha256 = _request_sha256(call)
+        except ValueError as exc:
+            return ValidationResult(
+                valid=False,
+                invalid_kind=InvalidActionKind.SCHEMA,
+                reason=f"tool request is not canonical JSON: {exc}",
+            )
+
+        exact_replay = False
+        processed_call_ids = set(state.get("processed_call_ids", []))
+        if call.call_id and call.call_id in processed_call_ids:
+            audit_log = state.get("audit_log", [])
+            matching_entries = (
+                [
+                    entry
+                    for entry in audit_log
+                    if isinstance(entry, dict) and entry.get("call_id") == call.call_id
+                ]
+                if isinstance(audit_log, list)
+                else []
+            )
+            if (
+                len(matching_entries) != 1
+                or matching_entries[0].get("request_sha256") != request_sha256
+            ):
+                return ValidationResult(
+                    valid=False,
+                    invalid_kind=InvalidActionKind.SAFETY,
+                    reason="call_id was already used for a different request",
+                )
+            exact_replay = True
+
         if schema.side_effect in self.task.forbidden_side_effects:
             return ValidationResult(
                 valid=False,
@@ -130,8 +218,7 @@ class ToolRegistry:
                 reason="operation_id does not ground to the selected tool",
             )
 
-        processed_call_ids = set(state.get("processed_call_ids", []))
-        if call.call_id and call.call_id in processed_call_ids:
+        if exact_replay:
             return ValidationResult(
                 valid=True,
                 reason="exact call replay resolved from the idempotency ledger",
@@ -258,6 +345,7 @@ class ToolRegistry:
                 "call_id": call.call_id,
                 "tool_name": call.tool_name,
                 "node_id": node.node_id,
+                "request_sha256": _request_sha256(call),
                 "version": next_state["version"],
             }
         )
