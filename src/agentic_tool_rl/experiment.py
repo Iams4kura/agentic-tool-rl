@@ -61,6 +61,7 @@ from agentic_tool_rl.evaluation import (
 )
 from agentic_tool_rl.features import FeatureEncoder
 from agentic_tool_rl.models import ActorCritic, ProgressEstimator
+from agentic_tool_rl.package_resources import implementation_fingerprint_v2
 from agentic_tool_rl.training import (
     CreditAssignment,
     evaluate_policy,
@@ -128,13 +129,22 @@ class ExperimentResult:
 
 
 def source_fingerprint(repo_root: str | Path | None = None) -> str:
+    """Hash checkout inputs, or the installed implementation when no checkout exists."""
+
+    explicit_root = repo_root is not None
     root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[2]
-    digest = hashlib.sha256()
     files = (
         sorted((root / "src").rglob("*.py"))
         + sorted((root / "configs").glob("*.yaml"))
         + [path for name in ("pyproject.toml", "uv.lock") if (path := root / name).is_file()]
     )
+    if not files:
+        if explicit_root:
+            raise ValueError(
+                f"source fingerprint root has no fingerprintable source inputs: {root}"
+            )
+        return implementation_fingerprint_v2()
+    digest = hashlib.sha256()
     for path in files:
         digest.update(path.relative_to(root).as_posix().encode("utf-8"))
         digest.update(b"\0")
