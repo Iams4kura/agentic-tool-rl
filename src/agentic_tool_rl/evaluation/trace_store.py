@@ -190,22 +190,29 @@ class TraceStore:
         self._inode = identity
 
     def __len__(self) -> int:
-        return len(self._records)
+        with self._thread_lock:
+            return len(self._records)
 
     def completed_case_ids(self) -> frozenset[str]:
-        return frozenset(self._records)
+        with self._thread_lock:
+            return frozenset(self._records)
 
     def missing_case_ids(self, expected: Iterable[str]) -> list[str]:
-        return [case_id for case_id in expected if case_id not in self._records]
+        with self._thread_lock:
+            completed = frozenset(self._records)
+        return [case_id for case_id in expected if case_id not in completed]
 
     def record_checksum(self, case_id: str) -> str:
-        try:
-            return self._checksums[case_id]
-        except KeyError as exc:
-            raise KeyError(f"case_id {case_id!r} is not in the trace store") from exc
+        with self._thread_lock:
+            try:
+                return self._checksums[case_id]
+            except KeyError as exc:
+                raise KeyError(f"case_id {case_id!r} is not in the trace store") from exc
 
     def records(self) -> list[dict[str, Any]]:
-        return [deepcopy(value) for value in self._records.values()]
+        with self._thread_lock:
+            snapshot = tuple(self._records.values())
+        return [deepcopy(value) for value in snapshot]
 
     def append(self, record: Mapping[str, Any]) -> bool:
         """Append once; return False for an identical already-complete case."""
