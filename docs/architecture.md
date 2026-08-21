@@ -138,7 +138,7 @@ action-validity-v2 的 20,000 个样本由环境 dry-run 冻结标签：
 - 19,500 standard candidates：公开 schema/observation 足以判定；
 - 500 hidden_ledger_collision：公开输入看起来合法，只有环境隐藏 ledger 能发现 key 已绑定到另一操作。
 
-因此报告的是**规则型 ActionMask 在合成约束集上的 BAcc**。recall、BAcc、macro-F1 与混淆矩阵只对冻结 action-validity-v2 全局计算一次并写入 benchmark/action_validity.metrics.json，不进入任一策略变体的 metrics.json；canonical report 仅引用这份全局证据。500 个隐藏挑战刻意展示部分可观测上限；该指标不是策略质量、规则发现能力或真实系统全状态安全率。
+因此报告的是**规则型 ActionMask 在合成约束集上的 BAcc**。recall、BAcc、macro-F1 与混淆矩阵只对冻结 action-validity-v2 全局计算一次并写入 run bundle 的 benchmark/action_validity.metrics.json，不回写共享 benchmark，也不进入任一策略变体的 metrics.json；canonical report 仅引用这份全局证据。500 个隐藏挑战刻意展示部分可观测上限；该指标不是策略质量、规则发现能力或真实系统全状态安全率。
 
 ## 7. 学习阶段
 

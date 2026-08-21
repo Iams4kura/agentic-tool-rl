@@ -113,7 +113,7 @@ canonical 分类集：
 
 动作 BAcc 与策略执行指标分开，不能按 variant 复制：
 
-- BAcc/recall/macro-F1：冻结候选分类能力，只写入全局 action_validity.metrics.json；
+- BAcc/recall/macro-F1：冻结候选分类能力，只写入 run bundle 的全局 action_validity.metrics.json；
 - invalid_action_rate：策略实际执行动作中的非法比例；
 - TSR：终态任务成功率。
 
@@ -137,7 +137,7 @@ invalid_recall = TN / (TN + FP)
 BAcc           = (valid_recall + invalid_recall) / 2
 ~~~
 
-同时在 benchmark/action_validity.metrics.json 发布 recall、macro-F1、混淆矩阵和四类 invalid recall；这些字段不进入策略 run 的 metrics.json。
+同时在 run bundle 的 benchmark/action_validity.metrics.json 发布 recall、macro-F1、混淆矩阵和四类 invalid recall；这些字段不进入策略 run 的 metrics.json，也不回写共享 benchmark 目录。
 
 ### 7.3 执行与安全
 
@@ -247,8 +247,9 @@ dev.jsonl
 test.jsonl
 action_validity.jsonl
 action_validity.manifest.json
-action_validity.metrics.json
 ~~~
+
+运行训练或消融矩阵后，全局 ActionMask 指标直接写入对应 run bundle 的 `benchmark/action_validity.metrics.json`。当前生成命令不创建这份派生文件；共享 benchmark 中已有的 legacy 文件保持不变，运行时也不会读取或复制它。
 
 verify-run 会重生成三个 split 和动作集、校验 family×topology held-out、opaque IDs、challenge counts、文件哈希与 case manifest，再逐步重放策略 trace。
 

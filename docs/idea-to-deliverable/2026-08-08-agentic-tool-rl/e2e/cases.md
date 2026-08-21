@@ -54,7 +54,7 @@
 - 设置：standard Schema/Grounding/Precondition/Safety negatives，以及 hidden_ledger_collision。
 - 操作：由独立规则 ActionMask 预测，再绕过 mask 交给环境 dry-run/execute。
 - 预期：standard 四类由 Mask 与环境一致拒绝，拒绝前后业务状态相同；hidden ledger 候选因公开输入不可区分而被 Mask 放行，但环境依隐藏 ledger 拒绝。
-- 通过：action-validity-v2 恰为 19,500 standard + 500 hidden、valid/invalid 各 10k；recall/BAcc/macro-F1 只写入全局 action_validity.metrics.json，报告准确命名为规则型 Mask 在合成约束集上的结果，不进入任一策略变体 metrics。
+- 通过：action-validity-v2 恰为 19,500 standard + 500 hidden、valid/invalid 各 10k；recall/BAcc/macro-F1 只写入 run bundle 的全局 action_validity.metrics.json，报告准确命名为规则型 Mask 在合成约束集上的结果，不进入任一策略变体 metrics。
 
 ### E2E-004：拓扑、替代顺序与合法无用动作
 
@@ -82,7 +82,7 @@
 - 设置：A-BC-Unmasked、B-BC-Mask、C-PPO-Sparse-Unmasked、D-PPO-Sparse-Mask、E-PPO-Progress-Mask、F-Sequence-PPO-Progress-Mask；seed 17/29/43/71/101。
 - 操作：对同一冻结 1000 题运行全部变体。
 - 预期：主比较 E vs B 使用同 BC 起点、Action Mask、seed/case 和推理环境；保存 30 runs、30,000 evaluation units、checkpoint、trace、metrics、recompute。
-- 通过：每个变体只报告 TSR、实际非法率、安全、步骤效率、successful_conditional_simulated_service_time_s、timeout_penalized_simulated_cost_s 和相应 CI；规则型 Mask BAcc 仅来自全局 action_validity.metrics.json 并由 canonical claim 引用；不填写尚未运行出的数值。
+- 通过：每个变体只报告 TSR、实际非法率、安全、步骤效率、successful_conditional_simulated_service_time_s、timeout_penalized_simulated_cost_s 和相应 CI；规则型 Mask BAcc 仅来自 run bundle 的全局 action_validity.metrics.json 并由 canonical claim 引用；不填写尚未运行出的数值。
 
 ### E2E-008：Trace 一致性复算
 
