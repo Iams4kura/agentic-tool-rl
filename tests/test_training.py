@@ -142,6 +142,27 @@ def test_checkpoint_save_is_atomic_on_serialization_failure(
     assert not list(tmp_path.glob(".policy.pt.*.tmp"))
 
 
+def test_checkpoint_round_trip_preserves_progress_hidden_dim(tmp_path: Path) -> None:
+    encoder = FeatureEncoder(16, 16)
+    model = ActorCritic(16, 16, 16)
+    estimator = ProgressEstimator(16, hidden_dim=8).freeze()
+
+    checkpoint = save_checkpoint(
+        tmp_path / "policy.pt",
+        model,
+        estimator,
+        encoder,
+        seed=7,
+        variant="test",
+        metadata={},
+    )
+    _, restored, _, _ = load_checkpoint(checkpoint)
+
+    assert restored.hidden_dim == 8
+    for expected, actual in zip(estimator.parameters(), restored.parameters(), strict=True):
+        assert torch.equal(expected, actual)
+
+
 def test_random_progress_estimator_is_not_required_for_sparse_episode() -> None:
     config = _smoke_config()
     tasks = generate_tasks("test", 1, base_seed=99)

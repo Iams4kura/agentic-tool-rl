@@ -99,6 +99,7 @@ class ProgressEstimator(nn.Module):
         if min(input_dim, hidden_dim) <= 0:
             raise ValueError("input_dim and hidden_dim must be positive")
         self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
         self.network = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
