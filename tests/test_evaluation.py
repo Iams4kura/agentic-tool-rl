@@ -120,6 +120,31 @@ def test_metrics_reject_missing_latency_evidence() -> None:
         compute_metrics([trace])
 
 
+def test_metrics_reject_step_count_that_disagrees_with_step_records() -> None:
+    trace = {**_traces()[0], "step_count": 200}
+
+    with pytest.raises(TraceSchemaError, match=r"step_count.*step records"):
+        compute_metrics([trace])
+
+
+@pytest.mark.parametrize("field", ("steps", "records"))
+def test_metrics_reject_conflicting_integer_step_counts(field: str) -> None:
+    trace = {**_traces()[0], "step_count": 2, field: 200}
+    if field == "records":
+        trace.pop("steps")
+
+    with pytest.raises(TraceSchemaError, match=r"step_count.*step evidence"):
+        compute_metrics([trace])
+
+
+def test_metrics_uses_integer_records_alias_as_step_count() -> None:
+    trace = _traces()[0]
+    trace.pop("steps")
+    trace["records"] = 2
+
+    assert compute_metrics([trace]).mean_steps == 2
+
+
 def test_case_clustered_bootstrap_is_seeded_and_keeps_clusters() -> None:
     traces = [
         *_traces(),

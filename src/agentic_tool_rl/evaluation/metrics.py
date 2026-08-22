@@ -105,15 +105,33 @@ def _step_records(trace: Mapping[str, Any]) -> list[Mapping[str, Any]]:
 
 
 def _step_count(trace: Mapping[str, Any], records: Sequence[Mapping[str, Any]]) -> int:
+    raw_field = "steps" if "steps" in trace else "records" if "records" in trace else None
+    raw_evidence = trace[raw_field] if raw_field is not None else None
     explicit = trace.get("step_count")
-    if explicit is None and isinstance(trace.get("steps"), int):
-        explicit = trace["steps"]
+    if explicit is None and isinstance(raw_evidence, int):
+        explicit = raw_evidence
     if explicit is None:
         explicit = len(records)
     count = _as_non_negative_float(explicit, field_name="step_count")
     if not count.is_integer():
         raise TraceSchemaError("step_count must be an integer")
-    return int(count)
+    resolved = int(count)
+    if isinstance(raw_evidence, int):
+        evidence_count = _as_non_negative_float(raw_evidence, field_name="step evidence")
+        if resolved != int(evidence_count):
+            raise TraceSchemaError(
+                f"step_count {resolved} does not match {int(evidence_count)} "
+                f"from {raw_field} step evidence"
+            )
+    elif (
+        isinstance(raw_evidence, Sequence)
+        and not isinstance(raw_evidence, (str, bytes, bytearray))
+        and resolved != len(records)
+    ):
+        raise TraceSchemaError(
+            f"step_count {resolved} does not match {len(records)} step records"
+        )
+    return resolved
 
 
 def _latency(trace: Mapping[str, Any], records: Sequence[Mapping[str, Any]]) -> float:
