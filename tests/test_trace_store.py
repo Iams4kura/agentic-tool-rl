@@ -298,6 +298,77 @@ def test_append_rebuilds_index_after_inode_replacement(tmp_path: Path) -> None:
     assert store.records() == [replacement, fresh]
 
 
+def test_open_rejects_final_symlink_without_touching_target(tmp_path: Path) -> None:
+    target = tmp_path / "unrelated.txt"
+    original = b"do not truncate this file"
+    target.write_bytes(original)
+    path = tmp_path / "traces.jsonl"
+    path.symlink_to(target)
+
+    with pytest.raises(ValueError, match="must not be a symbolic link"):
+        TraceStore(path)
+
+    assert target.read_bytes() == original
+
+
+def test_open_rejects_dangling_final_symlink_without_creating_target(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "missing.jsonl"
+    path = tmp_path / "traces.jsonl"
+    path.symlink_to(target)
+
+    with pytest.raises(ValueError, match="must not be a symbolic link"):
+        TraceStore(path)
+
+    assert not target.exists()
+
+
+def test_append_rejects_final_symlink_installed_after_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "traces.jsonl"
+    store = TraceStore(path)
+    original = _record("original")
+    assert store.append(original)
+    preserved_path = tmp_path / "preserved.jsonl"
+    original_bytes = f"{canonical_json(original)}\n".encode()
+    real_lock = TraceStore._lock
+    replaced = False
+
+    def replace_path_before_first_lock(handle: Any) -> None:
+        nonlocal replaced
+        if not replaced:
+            path.replace(preserved_path)
+            path.symlink_to(preserved_path)
+            replaced = True
+        real_lock(handle)
+
+    monkeypatch.setattr(
+        TraceStore,
+        "_lock",
+        staticmethod(replace_path_before_first_lock),
+    )
+
+    with pytest.raises(ValueError, match="must not be a symbolic link"):
+        store.append(_record("new"))
+
+    assert preserved_path.read_bytes() == original_bytes
+
+
+def test_parent_directory_symlink_remains_supported(tmp_path: Path) -> None:
+    real_parent = tmp_path / "real"
+    real_parent.mkdir()
+    linked_parent = tmp_path / "linked"
+    linked_parent.symlink_to(real_parent, target_is_directory=True)
+    record = _record("case-through-parent-link")
+
+    store = TraceStore(linked_parent / "traces.jsonl")
+
+    assert store.append(record)
+    assert TraceStore(real_parent / "traces.jsonl").records() == [record]
+
+
 def test_append_reopens_when_path_is_replaced_before_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
