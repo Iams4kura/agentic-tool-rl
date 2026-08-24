@@ -126,6 +126,13 @@ def compare_metrics(
     )
 
 
+def _paths_alias(left: Path, right: Path) -> bool:
+    try:
+        return left.samefile(right)
+    except FileNotFoundError:
+        return left.resolve() == right.resolve()
+
+
 def recompute_metrics(
     trace_path: str | Path,
     *,
@@ -139,9 +146,22 @@ def recompute_metrics(
 ) -> RecomputeResult:
     """Recompute from JSONL only and optionally compare with published JSON."""
 
+    trace_source = Path(trace_path)
+    published_source = (
+        Path(published_metrics_path) if published_metrics_path is not None else None
+    )
+    output_destination = Path(output_path) if output_path is not None else None
+    if output_destination is not None:
+        if _paths_alias(output_destination, trace_source):
+            raise ValueError("output_path must not refer to the traces input")
+        if published_source is not None and _paths_alias(
+            output_destination, published_source
+        ):
+            raise ValueError("output_path must not refer to the metrics input")
+
     published: dict[str, Any] | None = None
-    if published_metrics_path is not None:
-        with Path(published_metrics_path).open("r", encoding="utf-8") as handle:
+    if published_source is not None:
+        with published_source.open("r", encoding="utf-8") as handle:
             loaded = json.load(handle)
         if not isinstance(loaded, dict):
             raise ValueError("published metrics must be a JSON object")
@@ -162,13 +182,13 @@ def recompute_metrics(
             effective_confidence = float(published.get("confidence", 0.95))
 
     metrics = compute_metrics(
-        read_jsonl(trace_path),
+        read_jsonl(trace_source),
         timeout_s=effective_timeout if effective_timeout is not None else 30.0,
         bootstrap_samples=effective_samples if effective_samples is not None else 0,
         bootstrap_seed=effective_seed if effective_seed is not None else 20260808,
         confidence=effective_confidence if effective_confidence is not None else 0.95,
     )
     result = compare_metrics(metrics, published, tolerance=tolerance)
-    if output_path is not None:
-        write_json_atomic(output_path, result.to_dict())
+    if output_destination is not None:
+        write_json_atomic(output_destination, result.to_dict())
     return result
