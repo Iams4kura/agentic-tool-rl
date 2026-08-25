@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 import torch
 
+import agentic_tool_rl.training as training
 from agentic_tool_rl.config import ExperimentConfig, load_config
 from agentic_tool_rl.envs import generate_tasks
 from agentic_tool_rl.features import FeatureEncoder
@@ -140,6 +141,38 @@ def test_checkpoint_save_is_atomic_on_serialization_failure(
 
     assert checkpoint.read_bytes() == original
     assert not list(tmp_path.glob(".policy.pt.*.tmp"))
+
+
+def test_checkpoint_save_does_not_unlink_reused_temporary_path_after_replace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "policy.pt"
+    encoder = FeatureEncoder(16, 16)
+    model = ActorCritic(16, 16, 16)
+    estimator = ProgressEstimator(16)
+    reused_paths: list[Path] = []
+    real_replace = training.os.replace
+
+    def replace_and_reuse(source: str | Path, target: str | Path) -> None:
+        real_replace(source, target)
+        reused = Path(source)
+        reused.write_bytes(b"owned by another writer\n")
+        reused_paths.append(reused)
+
+    monkeypatch.setattr(training.os, "replace", replace_and_reuse)
+
+    save_checkpoint(
+        destination,
+        model,
+        estimator,
+        encoder,
+        seed=7,
+        variant="test",
+        metadata={},
+    )
+
+    assert len(reused_paths) == 1
+    assert reused_paths[0].read_bytes() == b"owned by another writer\n"
 
 
 def test_checkpoint_round_trip_preserves_progress_hidden_dim(tmp_path: Path) -> None:

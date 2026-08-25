@@ -1647,6 +1647,8 @@ def save_checkpoint(
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, destination)
+        # The source path is no longer ours after replace and may be reused.
+        temporary = None
         directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
         try:
             directory_fd = os.open(destination.parent, directory_flags)
