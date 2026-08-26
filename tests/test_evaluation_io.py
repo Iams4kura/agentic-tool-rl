@@ -18,7 +18,13 @@ def _write_jsonl(path: Path) -> Path:
     return evaluation_io.write_jsonl_atomic(path, [{"value": "new"}])
 
 
-@pytest.mark.parametrize("writer", (_write_json, _write_jsonl), ids=("json", "jsonl"))
+def _write_text(path: Path) -> Path:
+    return evaluation_io.write_text_atomic(path, "new\n")
+
+
+@pytest.mark.parametrize(
+    "writer", (_write_json, _write_jsonl, _write_text), ids=("json", "jsonl", "text")
+)
 @pytest.mark.parametrize("failure_point", ("fsync", "replace"))
 def test_atomic_writers_remove_temporary_file_after_failure(
     tmp_path: Path,

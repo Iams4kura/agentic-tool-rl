@@ -7,7 +7,6 @@ import json
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Any
 
 from agentic_tool_rl.contracts import (
@@ -26,6 +25,7 @@ from agentic_tool_rl.envs.benchmark import (
     generate_all_splits,
 )
 from agentic_tool_rl.envs.oracle import verify_task_solvable
+from agentic_tool_rl.evaluation.io import write_text_atomic
 
 
 def _canonical_json(value: Any) -> str:
@@ -37,11 +37,7 @@ def _pretty_json(value: Any) -> str:
 
 
 def _atomic_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
-        handle.write(content)
-        temporary = Path(handle.name)
-    temporary.replace(path)
+    write_text_atomic(path, content)
 
 
 def sha256_file(path: str | Path) -> str:

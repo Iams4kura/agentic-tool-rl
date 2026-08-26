@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -153,6 +154,26 @@ def test_generator_is_deterministic_down_to_jsonl_bytes(tmp_path: Path) -> None:
     assert first_path.read_bytes() == second_path.read_bytes()
     assert first_digest == second_digest == sha256_file(first_path)
     assert load_tasks_jsonl(first_path) == first
+
+
+def test_task_writer_removes_temporary_file_after_replace_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "tasks.jsonl"
+    original = b'{"value":"original"}\n'
+    destination.write_bytes(original)
+    tasks = generate_tasks(Split.TEST, 1, base_seed=701)
+
+    def fail_replace(*_args: object) -> None:
+        raise OSError("injected replace failure")
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="injected replace failure"):
+        save_tasks_jsonl(tasks, destination)
+
+    assert destination.read_bytes() == original
+    assert list(tmp_path.iterdir()) == [destination]
 
 
 def test_arbitrary_smoke_size_and_split_isolation() -> None:
