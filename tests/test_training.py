@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import errno
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -173,6 +175,38 @@ def test_checkpoint_save_does_not_unlink_reused_temporary_path_after_replace(
 
     assert len(reused_paths) == 1
     assert reused_paths[0].read_bytes() == b"owned by another writer\n"
+
+
+@pytest.mark.skipif(training.os.name == "nt", reason="directory fsync is POSIX-only")
+def test_checkpoint_save_propagates_directory_fsync_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "policy.pt"
+    encoder = FeatureEncoder(16, 16)
+    model = ActorCritic(16, 16, 16)
+    estimator = ProgressEstimator(16)
+    real_fsync = training.os.fsync
+
+    def fail_directory_fsync(file_descriptor: int) -> None:
+        if stat.S_ISDIR(training.os.fstat(file_descriptor).st_mode):
+            raise OSError(errno.EIO, "injected directory fsync failure")
+        real_fsync(file_descriptor)
+
+    monkeypatch.setattr(training.os, "fsync", fail_directory_fsync)
+
+    with pytest.raises(OSError) as error:
+        save_checkpoint(
+            destination,
+            model,
+            estimator,
+            encoder,
+            seed=7,
+            variant="test",
+            metadata={},
+        )
+
+    assert error.value.errno == errno.EIO
+    assert destination.is_file()
 
 
 def test_checkpoint_round_trip_preserves_progress_hidden_dim(tmp_path: Path) -> None:
