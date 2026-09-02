@@ -45,6 +45,7 @@ from agentic_tool_rl.contracts import (
 from agentic_tool_rl.envs import TransactionalWorkflowEnv
 from agentic_tool_rl.envs.benchmark_v14 import GOAL_VARIANTS, optimal_candidate_indices
 from agentic_tool_rl.evaluation import TraceStore
+from agentic_tool_rl.evaluation.io import _fsync_directory
 from agentic_tool_rl.features import FeatureEncoder
 from agentic_tool_rl.grounding import ActionMask
 from agentic_tool_rl.models import ActorCritic, ProgressEstimator
@@ -1647,20 +1648,9 @@ def save_checkpoint(
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, destination)
-        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-        try:
-            directory_fd = os.open(destination.parent, directory_flags)
-        except OSError:
-            directory_fd = None
-        if directory_fd is not None:
-            try:
-                os.fsync(directory_fd)
-            except OSError:
-                # Some supported filesystems do not implement directory fsync;
-                # the file remains atomically replaced and fully fsync'd.
-                pass
-            finally:
-                os.close(directory_fd)
+        # The source path is no longer ours after replace and may be reused.
+        temporary = None
+        _fsync_directory(destination.parent)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
