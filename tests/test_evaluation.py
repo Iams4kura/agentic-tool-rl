@@ -193,6 +193,31 @@ def test_metrics_json_can_be_independently_recomputed(tmp_path: Path) -> None:
     assert [item.path for item in mismatch.differences] == ["tsr"]
 
 
+@pytest.mark.parametrize("input_name", ("traces", "metrics"))
+def test_recompute_rejects_output_that_would_replace_input(
+    tmp_path: Path, input_name: str
+) -> None:
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_text(
+        "".join(f"{canonical_json(trace)}\n" for trace in _traces()), encoding="utf-8"
+    )
+    metrics = compute_metrics(_traces(), timeout_s=30.0)
+    metrics_path = write_json_atomic(tmp_path / "metrics.json", metrics.to_dict())
+    original_trace = trace_path.read_bytes()
+    original_metrics = metrics_path.read_bytes()
+    output_path = trace_path if input_name == "traces" else metrics_path
+
+    with pytest.raises(ValueError, match=f"output_path.*{input_name}"):
+        recompute_metrics(
+            trace_path,
+            published_metrics_path=metrics_path,
+            output_path=output_path,
+        )
+
+    assert trace_path.read_bytes() == original_trace
+    assert metrics_path.read_bytes() == original_metrics
+
+
 def test_precomputed_metrics_can_be_compared_without_reloading_traces() -> None:
     metrics = compute_metrics(_traces(), timeout_s=30.0)
 
