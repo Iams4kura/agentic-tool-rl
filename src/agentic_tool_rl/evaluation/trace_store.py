@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -50,7 +51,7 @@ class TraceStore:
         # file lock.
         with self._thread_lock:
             for _ in range(_MAX_PATH_RETRIES):
-                with self.path.open("a+b") as handle:
+                with self._open_handle() as handle:
                     self._lock(handle)
                     try:
                         if not self._path_matches_handle(handle):
@@ -80,11 +81,25 @@ class TraceStore:
         status = os.fstat(handle.fileno())
         return status.st_dev, status.st_ino
 
+    @staticmethod
+    def _open_no_follow(path: str, flags: int) -> int:
+        return os.open(path, flags | os.O_NOFOLLOW, 0o666)
+
+    def _open_handle(self) -> BinaryIO:
+        try:
+            return open(self.path, "a+b", opener=self._open_no_follow)
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                raise ValueError(
+                    f"trace store path must not be a symbolic link: {self.path}"
+                ) from exc
+            raise
+
     def _path_matches_handle(self, handle: BinaryIO) -> bool:
         """Return whether ``path`` still names the opened file description."""
 
         try:
-            status = self.path.stat()
+            status = self.path.lstat()
         except OSError:
             return False
         return (status.st_dev, status.st_ino) == self._file_identity(handle)
@@ -225,7 +240,7 @@ class TraceStore:
 
         with self._thread_lock:
             for _ in range(_MAX_PATH_RETRIES):
-                with self.path.open("a+b") as handle:
+                with self._open_handle() as handle:
                     self._lock(handle)
                     try:
                         # A non-cooperating os.replace can race open() before
