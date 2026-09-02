@@ -606,6 +606,7 @@ import sys
 from pathlib import Path
 import agentic_tool_rl
 from agentic_tool_rl.config import load_packaged_config
+from agentic_tool_rl.experiment import source_fingerprint
 from agentic_tool_rl.package_resources import (
     implementation_fingerprint_v2,
     packaged_protocol_sha256,
@@ -629,6 +630,7 @@ print(json.dumps({
     "ablation": ablation.name,
     "protocol_sha256": packaged_protocol_sha256("benchmark-v1.4-development.json"),
     "implementation_fingerprint": implementation_fingerprint_v2(),
+    "source_fingerprint": source_fingerprint(),
     "requires_dist": importlib.metadata.requires("agentic-tool-rl") or [],
     "site_packages": site_packages,
     "sys_path": list(sys.path),
@@ -669,6 +671,10 @@ print(json.dumps({
         if probe.get("implementation_fingerprint") != expected_implementation_fingerprint:
             raise DistributionCheckError(
                 "installed-wheel implementation fingerprint differs from checkout"
+            )
+        if probe.get("source_fingerprint") != expected_implementation_fingerprint:
+            raise DistributionCheckError(
+                "installed-wheel source fingerprint differs from its implementation"
             )
 
         config_path = contract_root / "smoke.yaml"
@@ -815,6 +821,7 @@ print(json.dumps({
             "prefix": str(probe["prefix"]),
             "cwd": str(empty_cwd),
             "implementation_fingerprint": expected_implementation_fingerprint,
+            "source_fingerprint": expected_implementation_fingerprint,
             "runtime_constraints_sha256": runtime_constraints_sha256,
             "runtime_requirements": len(runtime_requirements),
             "host_site_injection": False,

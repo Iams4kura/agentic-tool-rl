@@ -31,6 +31,7 @@ from agentic_tool_rl.evaluation import (
     verify_case_id_manifest,
 )
 from agentic_tool_rl.experiment import runtime_identity, source_fingerprint
+from agentic_tool_rl.package_resources import implementation_fingerprint_v2
 
 
 def _frozen_examples(
@@ -175,6 +176,29 @@ def test_source_fingerprint_covers_lock_and_build_inputs(tmp_path: Path) -> None
         "torch_version",
         "torch_cuda_version",
     }
+
+
+def test_source_fingerprint_uses_packaged_implementation_outside_checkout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    installed_module = (
+        tmp_path
+        / "venv"
+        / "lib"
+        / "python3.11"
+        / "site-packages"
+        / "agentic_tool_rl"
+        / "experiment.py"
+    )
+    monkeypatch.setattr("agentic_tool_rl.experiment.__file__", str(installed_module))
+
+    assert source_fingerprint() == implementation_fingerprint_v2()
+
+
+def test_source_fingerprint_rejects_empty_explicit_root(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="no fingerprintable source inputs"):
+        source_fingerprint(tmp_path)
 
 
 def test_canonical_run_signature_covers_all_four_hashes() -> None:
