@@ -22,6 +22,7 @@ from agentic_tool_rl.envs.action_validity import generate_action_validity_datase
 from agentic_tool_rl.envs.benchmark import (
     DEFAULT_BASE_SEED,
     GENERATOR_VERSION,
+    assert_splits_disjoint,
     generate_all_splits,
 )
 from agentic_tool_rl.envs.oracle import verify_task_solvable
@@ -183,6 +184,9 @@ def write_benchmark(
             solvable = len(reports)
         prepared_splits.append((split, tasks, solvable))
 
+    assert_splits_disjoint(
+        {split: tasks for split, tasks, _solvable in prepared_splits}
+    )
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
     files: dict[str, BenchmarkFile] = {}
