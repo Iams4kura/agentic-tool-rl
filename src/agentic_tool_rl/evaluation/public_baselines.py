@@ -123,7 +123,11 @@ def _case_trace(task: WorkflowTask, baseline: PublicReadyGreedy) -> dict[str, An
     }
 
 
-def _validate_v13_tasks(tasks: Sequence[WorkflowTask]) -> list[WorkflowTask]:
+def _validate_v13_tasks(
+    tasks: Sequence[WorkflowTask],
+    *,
+    base_seed: int,
+) -> list[WorkflowTask]:
     ordered = sorted(tasks, key=lambda task: task.case_id)
     if not ordered:
         raise ValueError("audit requires at least one task")
@@ -133,22 +137,19 @@ def _validate_v13_tasks(tasks: Sequence[WorkflowTask]) -> list[WorkflowTask]:
         raise ValueError(f"audit accepts only frozen {V13_GENERATOR_VERSION} tasks")
     if any(task.split != Split.TEST for task in ordered):
         raise ValueError("v1.3 public-ready audit accepts only test tasks")
-    return ordered
-
-
-def build_public_ready_audit(
-    tasks: Sequence[WorkflowTask],
-    *,
-    base_seed: int,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Run R1 and return deterministic per-case traces plus their manifest."""
-
-    ordered = _validate_v13_tasks(tasks)
     regenerated = generate_tasks(Split.TEST, len(ordered), base_seed=base_seed)
     if [task.model_dump(mode="json") for task in ordered] != [
         task.model_dump(mode="json") for task in regenerated
     ]:
         raise ValueError("tasks do not match the declared frozen v1.3 base seed and size")
+    return ordered
+
+
+def _build_public_ready_audit_from_validated_tasks(
+    ordered: Sequence[WorkflowTask],
+    *,
+    base_seed: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     baseline = PublicReadyGreedy()
     traces = [_case_trace(task, baseline) for task in ordered]
     successful = sum(bool(trace["success"]) for trace in traces)
@@ -191,6 +192,17 @@ def build_public_ready_audit(
     return traces, manifest
 
 
+def build_public_ready_audit(
+    tasks: Sequence[WorkflowTask],
+    *,
+    base_seed: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Run R1 and return deterministic per-case traces plus their manifest."""
+
+    ordered = _validate_v13_tasks(tasks, base_seed=base_seed)
+    return _build_public_ready_audit_from_validated_tasks(ordered, base_seed=base_seed)
+
+
 def write_public_ready_audit(
     output_dir: str | Path,
     tasks: Sequence[WorkflowTask],
@@ -201,6 +213,14 @@ def write_public_ready_audit(
 
     directory = Path(output_dir)
     traces, manifest = build_public_ready_audit(tasks, base_seed=base_seed)
+    write_json_atomic(
+        directory / VERIFICATION_FILENAME,
+        {
+            "schema_version": AUDIT_SCHEMA_VERSION,
+            "passed": False,
+            "status": "publication-in-progress",
+        },
+    )
     trace_path = write_jsonl_atomic(directory / TRACE_FILENAME, traces)
     if _file_sha256(trace_path) != manifest["trace"]["sha256"]:
         raise RuntimeError("written audit trace differs from the canonical payload")
@@ -229,8 +249,20 @@ def verify_public_ready_audit(
     directory = Path(output_dir)
     trace_path = directory / TRACE_FILENAME
     manifest_path = directory / MANIFEST_FILENAME
+    ordered = _validate_v13_tasks(tasks, base_seed=base_seed)
+    write_json_atomic(
+        directory / VERIFICATION_FILENAME,
+        {
+            "schema_version": AUDIT_SCHEMA_VERSION,
+            "passed": False,
+            "status": "independent-replay-in-progress",
+        },
+    )
+    expected_traces, expected_manifest = _build_public_ready_audit_from_validated_tasks(
+        ordered,
+        base_seed=base_seed,
+    )
     actual_traces = read_jsonl(trace_path)
-    expected_traces, expected_manifest = build_public_ready_audit(tasks, base_seed=base_seed)
     if actual_traces != expected_traces:
         raise RuntimeError("public-ready audit trace replay mismatch")
     actual_manifest = _read_mapping(manifest_path)

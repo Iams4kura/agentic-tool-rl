@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from agentic_tool_rl import v14_acceptance
 from agentic_tool_rl.cli import app
 from agentic_tool_rl.contracts import CounterfactualWorkflowTask, Split
 from agentic_tool_rl.envs.benchmark_v14 import generate_counterfactual_tasks
@@ -194,6 +195,66 @@ def test_v14_real_acceptance_writes_replayable_artifacts(tmp_path: Path) -> None
         random_seed=19,
     )
     assert verification["passed"] is True
+
+
+def test_v14_acceptance_invalidates_success_before_replacing_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "benchmark-v14"
+    run_v14_development_acceptance(
+        output,
+        train_groups=1,
+        dev_groups=1,
+        test_groups=1,
+        base_seed=19,
+    )
+    original_generate = v14_acceptance.generate_all_splits_v14
+    original_write_benchmark = v14_acceptance.write_benchmark_v14
+    generation_count = 0
+
+    def fail_replay(**kwargs: int) -> object:
+        nonlocal generation_count
+        generation_count += 1
+        if generation_count == 2:
+            raise RuntimeError("injected replay failure")
+        return original_generate(**kwargs)
+
+    def assert_invalidated_before_benchmark(*args: object, **kwargs: object) -> Path:
+        verification = json.loads((output / "verification.json").read_text(encoding="utf-8"))
+        assert verification == {
+            "schema_version": "benchmark-v1.4-development-verification-v1",
+            "passed": False,
+            "status": "publication-in-progress",
+            "canonical": False,
+            "canonical_final_executed": False,
+            "base_seed": 31,
+        }
+        return original_write_benchmark(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(v14_acceptance, "generate_all_splits_v14", fail_replay)
+    monkeypatch.setattr(v14_acceptance, "write_benchmark_v14", assert_invalidated_before_benchmark)
+
+    with pytest.raises(RuntimeError, match="injected replay failure"):
+        run_v14_development_acceptance(
+            output,
+            train_groups=1,
+            dev_groups=1,
+            test_groups=1,
+            base_seed=31,
+        )
+
+    verification = json.loads((output / "verification.json").read_text(encoding="utf-8"))
+    assert verification == {
+        "schema_version": "benchmark-v1.4-development-verification-v1",
+        "passed": False,
+        "status": "publication-in-progress",
+        "canonical": False,
+        "canonical_final_executed": False,
+        "base_seed": 31,
+    }
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["base_seed"] == 31
 
 
 def test_exact_development_protocol_identity_binds_seed_and_registry() -> None:
