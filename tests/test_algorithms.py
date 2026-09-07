@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
+import pytest
 import torch
 
 from agentic_tool_rl.algorithms import (
@@ -29,6 +31,91 @@ def _candidate_batch(size: int = 64) -> PolicyBatch:
     masked_scores = scores.unsqueeze(0).expand(size, -1).masked_fill(~masks, -torch.inf)
     actions = masked_scores.argmax(dim=-1)
     return PolicyBatch(states, action_features, masks, actions)
+
+
+def _ppo_batch(size: int = 8) -> PPOBatch:
+    policy = _candidate_batch(size)
+    values = torch.zeros(size, dtype=policy.states.dtype)
+    return PPOBatch(
+        states=policy.states,
+        action_features=policy.action_features,
+        action_masks=policy.action_masks,
+        actions=policy.actions,
+        old_log_probs=values,
+        old_values=values,
+        returns=values,
+        advantages=values,
+    )
+
+
+def test_policy_batch_rejects_invalid_training_values() -> None:
+    batch = _candidate_batch(4)
+    no_actions = batch.action_masks.clone()
+    no_actions[0] = False
+    masked_selection = batch.action_masks.clone()
+    masked_selection[0, batch.actions[0]] = False
+    negative_action = batch.actions.clone()
+    negative_action[0] = -1
+    out_of_range_action = batch.actions.clone()
+    out_of_range_action[0] = batch.action_masks.shape[1]
+    non_finite_states = batch.states.clone()
+    non_finite_states[0, 0] = torch.nan
+    non_finite_actions = batch.action_features.clone()
+    non_finite_actions[0, 0, 0] = torch.inf
+
+    cases = (
+        (
+            replace(
+                batch,
+                states=batch.states[:0],
+                action_features=batch.action_features[:0],
+                action_masks=batch.action_masks[:0],
+                actions=batch.actions[:0],
+            ),
+            "at least one state",
+        ),
+        (
+            replace(
+                batch,
+                action_features=batch.action_features[:, :0],
+                action_masks=batch.action_masks[:, :0],
+            ),
+            "at least one candidate slot",
+        ),
+        (replace(batch, states=batch.states.to(torch.int64)), "floating dtype"),
+        (
+            replace(batch, action_features=batch.action_features.to(torch.float64)),
+            "states floating dtype",
+        ),
+        (replace(batch, action_masks=batch.action_masks.to(torch.float32)), "bool dtype"),
+        (replace(batch, actions=batch.actions.to(torch.float32)), "torch.long dtype"),
+        (replace(batch, action_features=batch.action_features.to("meta")), "same device"),
+        (replace(batch, action_masks=no_actions), "at least one valid action"),
+        (replace(batch, actions=negative_action), "out-of-range"),
+        (replace(batch, actions=out_of_range_action), "out-of-range"),
+        (replace(batch, action_masks=masked_selection), "masked out"),
+        (replace(batch, states=non_finite_states), "finite"),
+        (replace(batch, action_features=non_finite_actions), "finite"),
+    )
+
+    for invalid, message in cases:
+        with pytest.raises(ValueError, match=message):
+            invalid.validate()
+
+
+def test_ppo_batch_rejects_invalid_training_targets() -> None:
+    batch = _ppo_batch()
+    non_finite = batch.advantages.clone()
+    non_finite[0] = torch.nan
+
+    for field in ("old_log_probs", "old_values", "returns", "advantages"):
+        with pytest.raises(ValueError, match=field):
+            replace(batch, **{field: getattr(batch, field).to(torch.float64)}).validate()
+        with pytest.raises(ValueError, match=field):
+            replace(batch, **{field: non_finite}).validate()
+
+    with pytest.raises(ValueError, match="old_log_probs"):
+        replace(batch, old_log_probs=batch.old_log_probs.to("meta")).validate()
 
 
 def test_actor_critic_masks_dynamic_candidates() -> None:

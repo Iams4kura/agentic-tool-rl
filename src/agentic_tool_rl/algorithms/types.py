@@ -33,6 +33,44 @@ class PolicyBatch:
             raise ValueError("policy batch tensors are not aligned")
         if self.action_features.shape[:2] != self.action_masks.shape:
             raise ValueError("candidate and mask shapes differ")
+        if size == 0:
+            raise ValueError("policy batch must contain at least one state")
+        if self.action_features.shape[1] == 0:
+            raise ValueError("every state must expose at least one candidate slot")
+
+        device = self.states.device
+        if not self.states.is_floating_point():
+            raise ValueError("states must use a floating dtype")
+        if (
+            not self.action_features.is_floating_point()
+            or self.action_features.dtype != self.states.dtype
+        ):
+            raise ValueError("action_features must use the states floating dtype")
+        if self.action_masks.dtype != torch.bool:
+            raise ValueError("action_masks must use bool dtype")
+        if self.actions.dtype != torch.long:
+            raise ValueError("actions must use torch.long dtype")
+        for name, tensor in (
+            ("action_features", self.action_features),
+            ("action_masks", self.action_masks),
+            ("actions", self.actions),
+        ):
+            if tensor.device != device:
+                raise ValueError(f"{name} must use the same device as states")
+        if not bool(torch.isfinite(self.states).all()) or not bool(
+            torch.isfinite(self.action_features).all()
+        ):
+            raise ValueError("policy features must be finite")
+        if not bool(self.action_masks.any(dim=1).all()):
+            raise ValueError("every state must expose at least one valid action")
+        if bool((self.actions < 0).any()) or bool(
+            (self.actions >= self.action_masks.shape[1]).any()
+        ):
+            raise ValueError("actions contain an out-of-range candidate index")
+        if not bool(
+            self.action_masks.gather(1, self.actions.unsqueeze(1)).squeeze(1).all()
+        ):
+            raise ValueError("a recorded action is masked out")
 
 
 @dataclass(frozen=True)
@@ -153,6 +191,12 @@ class PPOBatch(PolicyBatch):
         ):
             if tensor.ndim != 1 or tensor.shape[0] != size:
                 raise ValueError(f"{name} must have shape [N]")
+            if tensor.device != self.states.device or tensor.dtype != self.states.dtype:
+                raise ValueError(
+                    f"{name} must share the policy tensor device and dtype"
+                )
+            if not bool(torch.isfinite(tensor).all()):
+                raise ValueError(f"{name} must contain only finite values")
 
 
 @dataclass(frozen=True)
@@ -234,34 +278,6 @@ class SequencePPOBatch(PolicyBatch):
             raise ValueError("gamma must be finite and in [0, 1]")
 
         device = self.states.device
-        if not self.states.is_floating_point():
-            raise ValueError("states must use a floating dtype")
-        if (
-            not self.action_features.is_floating_point()
-            or self.action_features.dtype != self.states.dtype
-        ):
-            raise ValueError("action_features must use the states floating dtype")
-        if self.action_masks.dtype != torch.bool:
-            raise ValueError("action_masks must use bool dtype")
-        if self.actions.dtype != torch.long:
-            raise ValueError("actions must use torch.long dtype")
-        if self.action_features.shape[1] == 0:
-            raise ValueError("every step must expose at least one candidate slot")
-        if not bool(self.action_masks.any(dim=1).all()):
-            raise ValueError("every step must expose at least one valid action")
-        if bool((self.actions < 0).any()) or bool(
-            (self.actions >= self.action_masks.shape[1]).any()
-        ):
-            raise ValueError("actions contain an out-of-range candidate index")
-        if not bool(
-            self.action_masks.gather(1, self.actions.unsqueeze(1)).squeeze(1).all()
-        ):
-            raise ValueError("a recorded action is masked out")
-        if not bool(torch.isfinite(self.states).all()) or not bool(
-            torch.isfinite(self.action_features).all()
-        ):
-            raise ValueError("policy features must be finite")
-
         for name, tensor, expected_dtype in (
             ("episode_indices", self.episode_indices, torch.long),
             ("initial_state_indices", self.initial_state_indices, torch.long),
