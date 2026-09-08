@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_default_ci_is_lightweight_only() -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    ci_recipe = makefile.split("ci: sync", maxsplit=1)[1].split(
+    ci_recipe = makefile.split("\nci:", maxsplit=1)[1].split(
         "benchmark:", maxsplit=1
     )[0]
 
