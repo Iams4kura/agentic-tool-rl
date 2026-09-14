@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any
 
@@ -36,7 +37,12 @@ def _read_field(record: object, name: str, default: Any = None) -> Any:
 
 @dataclass(frozen=True)
 class StepRecord:
-    """One structured tool invocation, which is exactly one RL step."""
+    """One structured tool invocation, which is exactly one RL step.
+
+    Structured inputs are copied at construction so callers can reuse their
+    mutable observations, candidates and metadata without changing past evidence.
+    This isolates caller inputs; nested record fields are not read-only.
+    """
 
     trajectory_id: str
     step_index: int
@@ -61,11 +67,13 @@ class StepRecord:
     info: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "candidates", tuple(self.candidates))
+        object.__setattr__(self, "observation", deepcopy(self.observation))
+        object.__setattr__(self, "next_observation", deepcopy(self.next_observation))
+        object.__setattr__(self, "candidates", deepcopy(tuple(self.candidates)))
         object.__setattr__(self, "action_mask", tuple(bool(item) for item in self.action_mask))
         object.__setattr__(self, "state_features", _snapshot_tensor(self.state_features))
         object.__setattr__(self, "action_features", _snapshot_tensor(self.action_features))
-        object.__setattr__(self, "info", dict(self.info))
+        object.__setattr__(self, "info", deepcopy(dict(self.info)))
         if not self.trajectory_id:
             raise ValueError("trajectory_id must not be empty")
         if self.step_index < 0:
