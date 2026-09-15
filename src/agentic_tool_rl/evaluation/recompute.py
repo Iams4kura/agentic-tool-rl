@@ -80,7 +80,9 @@ def _diff(
         if not isclose(float(expected), float(actual), rel_tol=0.0, abs_tol=tolerance):
             output.append(MetricDifference(path, expected, actual, difference))
         return
-    if expected != actual:
+    # Python considers True == 1 and False == 0, but these are distinct JSON
+    # types. Numeric tolerance must never make boolean evidence interchangeable.
+    if isinstance(expected, bool) != isinstance(actual, bool) or expected != actual:
         output.append(MetricDifference(path, expected, actual))
 
 
