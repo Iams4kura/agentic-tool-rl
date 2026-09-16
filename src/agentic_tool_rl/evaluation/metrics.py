@@ -260,12 +260,12 @@ def compute_metrics(
     executed_valid: list[bool] = []
 
     for row in rows:
-        case_id = str(_require(row, "case_id"))
-        if not case_id:
-            raise TraceSchemaError("case_id must not be empty")
-        family = str(_require(row, "family"))
-        if not family:
-            raise TraceSchemaError(f"trace {case_id!r} has an empty family")
+        case_id = _require(row, "case_id")
+        if not isinstance(case_id, str) or not case_id:
+            raise TraceSchemaError("case_id must be a non-empty string")
+        family = _require(row, "family")
+        if not isinstance(family, str) or not family:
+            raise TraceSchemaError(f"trace {case_id!r} family must be a non-empty string")
         success = _as_bool(_require(row, "success"), field_name="success")
         records = _step_records(row)
         steps = _step_count(row, records)
