@@ -37,7 +37,15 @@ def potential_shaping(
     if beta < 0:
         raise ValueError("beta must be non-negative")
     current = torch.as_tensor(phi)
-    following = torch.as_tensor(phi_next, device=current.device, dtype=current.dtype)
+    following = torch.as_tensor(phi_next, device=current.device)
+    if current.is_floating_point() or current.is_complex():
+        following = following.to(dtype=current.dtype)
+    else:
+        dtype = torch.promote_types(current.dtype, following.dtype)
+        if not (dtype.is_floating_point or dtype.is_complex):
+            dtype = torch.get_default_dtype()
+        current = current.to(dtype=dtype)
+        following = following.to(dtype=dtype)
     if current.shape != following.shape:
         raise ValueError("phi and phi_next must have equal shapes")
     return beta * (gamma * following - current)
@@ -63,8 +71,14 @@ def shape_trajectory(
         raise ValueError("potentials must contain one more item than base_rewards")
     terms = potential_shaping(
         potentials[:-1], potentials[1:], gamma=gamma, beta=beta
-    ).to(device=base_rewards.device, dtype=base_rewards.dtype)
-    return base_rewards + terms, terms
+    )
+    dtype = (
+        base_rewards.dtype
+        if base_rewards.is_floating_point() or base_rewards.is_complex()
+        else terms.dtype
+    )
+    terms = terms.to(device=base_rewards.device, dtype=dtype)
+    return base_rewards.to(dtype=dtype) + terms, terms
 
 
 def discounted_shaping_sum(terms: Tensor, *, gamma: float) -> Tensor:
