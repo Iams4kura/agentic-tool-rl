@@ -20,37 +20,68 @@ from agentic_tool_rl.grounding.candidates import build_candidate_actions
 from agentic_tool_rl.tools.registry import ToolRegistry
 
 _INTERNAL_STATE_KEYS = {"processed_call_ids", "idempotency_results", "audit_log"}
+_MISSING = object()
 
 
 def _read_path(state: Mapping[str, Any], path: str) -> Any:
     value: Any = state
     for component in path.split("."):
         if not isinstance(value, Mapping) or component not in value:
-            return None
+            return _MISSING
         value = value[component]
     return value
 
 
+def _json_equal(actual: Any, expected: Any) -> bool:
+    """Compare JSON values without Python's bool/int equivalence."""
+
+    if isinstance(actual, bool) or isinstance(expected, bool):
+        return isinstance(actual, bool) and isinstance(expected, bool) and actual == expected
+    if isinstance(actual, Mapping) and isinstance(expected, Mapping):
+        return actual.keys() == expected.keys() and all(
+            _json_equal(value, expected[key]) for key, value in actual.items()
+        )
+    if isinstance(actual, (list, tuple)) and type(actual) is type(expected):
+        return len(actual) == len(expected) and all(
+            _json_equal(left, right) for left, right in zip(actual, expected, strict=True)
+        )
+    return bool(actual == expected)
+
+
 def predicate_holds(state: Mapping[str, Any], predicate: StatePredicate) -> bool:
     actual = _read_path(state, predicate.path)
+    if actual is _MISSING:
+        return False
     expected = predicate.value
     if predicate.operator == "eq":
-        return bool(actual == expected)
+        return _json_equal(actual, expected)
     if predicate.operator == "ne":
-        return bool(actual != expected)
+        return not _json_equal(actual, expected)
     if predicate.operator == "contains":
-        return isinstance(actual, (list, tuple, set, str, dict)) and expected in actual
+        if isinstance(actual, (list, tuple, set)):
+            return any(_json_equal(item, expected) for item in actual)
+        return isinstance(actual, (str, dict)) and expected in actual
     if predicate.operator == "contains_all":
-        return isinstance(actual, (list, tuple, set)) and isinstance(expected, list) and set(
-            expected
-        ).issubset(set(actual))
+        return (
+            isinstance(actual, (list, tuple, set))
+            and isinstance(expected, list)
+            and all(any(_json_equal(item, required) for item in actual) for required in expected)
+        )
     if predicate.operator == "gte":
-        return isinstance(actual, (int, float)) and isinstance(expected, (int, float)) and (
-            actual >= expected
+        return (
+            isinstance(actual, (int, float))
+            and not isinstance(actual, bool)
+            and isinstance(expected, (int, float))
+            and not isinstance(expected, bool)
+            and (actual >= expected)
         )
     if predicate.operator == "lte":
-        return isinstance(actual, (int, float)) and isinstance(expected, (int, float)) and (
-            actual <= expected
+        return (
+            isinstance(actual, (int, float))
+            and not isinstance(actual, bool)
+            and isinstance(expected, (int, float))
+            and not isinstance(expected, bool)
+            and (actual <= expected)
         )
     return False
 

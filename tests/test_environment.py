@@ -5,12 +5,64 @@ from copy import deepcopy
 
 import pytest
 
-from agentic_tool_rl.contracts import InvalidActionKind, Split, ToolCall
+from agentic_tool_rl.contracts import InvalidActionKind, Split, StatePredicate, ToolCall
 from agentic_tool_rl.envs.benchmark import WORKFLOW_TOPOLOGIES, generate_tasks
-from agentic_tool_rl.envs.workflow import TransactionalWorkflowEnv
+from agentic_tool_rl.envs.workflow import TransactionalWorkflowEnv, predicate_holds
 from agentic_tool_rl.grounding.action_mask import ActionMask
 from agentic_tool_rl.grounding.candidates import build_candidate_actions
 from agentic_tool_rl.latency_profile import READ_ONLY_QUERY_S
+
+
+@pytest.mark.parametrize(
+    "operator,value",
+    [("eq", None), ("ne", 1), ("contains", "x"), ("contains_all", ["x"]), ("gte", 0), ("lte", 0)],
+)
+def test_missing_goal_path_never_satisfies_predicate(operator: str, value: object) -> None:
+    predicate = StatePredicate.model_validate(
+        {"path": "nested.missing", "operator": operator, "value": value}
+    )
+    assert not predicate_holds({"nested": {}}, predicate)
+    assert predicate_holds(
+        {"nested": {"missing": None}},
+        StatePredicate(path="nested.missing", operator="eq", value=None),
+    )
+
+
+@pytest.mark.parametrize("operator", ["eq", "gte", "lte"])
+def test_boolean_never_satisfies_numeric_goal(operator: str) -> None:
+    assert not predicate_holds(
+        {"version": True},
+        StatePredicate.model_validate({"path": "version", "operator": operator, "value": 1}),
+    )
+    assert not predicate_holds(
+        {"version": 1},
+        StatePredicate.model_validate({"path": "version", "operator": operator, "value": True}),
+    )
+
+
+def test_goal_membership_keeps_boolean_distinct_from_number() -> None:
+    assert not predicate_holds(
+        {"flags": [True]}, StatePredicate(path="flags", operator="contains", value=1)
+    )
+    assert not predicate_holds(
+        {"flags": [True]}, StatePredicate(path="flags", operator="contains_all", value=[1])
+    )
+    assert not predicate_holds(
+        {"nested": {"ready": True}},
+        StatePredicate(path="nested", operator="eq", value={"ready": 1}),
+    )
+    assert predicate_holds({"version": 1}, StatePredicate(path="version", operator="eq", value=1.0))
+
+
+def test_missing_goal_field_cannot_finish_workflow(task) -> None:  # type: ignore[no-untyped-def]
+    altered = task.model_copy(
+        update={
+            "hidden_goal_predicates": [
+                StatePredicate(path="absent", operator="eq", value=None)
+            ]
+        }
+    )
+    assert not TransactionalWorkflowEnv(altered).evaluate().success
 
 
 @pytest.fixture
