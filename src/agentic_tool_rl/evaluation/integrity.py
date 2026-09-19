@@ -14,7 +14,7 @@ from typing import Any
 
 import torch
 
-from agentic_tool_rl.evaluation.io import canonical_json, sha256_json
+from agentic_tool_rl.evaluation.io import _fsync_directory, canonical_json, sha256_json
 
 _DIGEST_KEYS = (
     "benchmark_sha256",
@@ -251,6 +251,11 @@ class ResumeGuard:
         finally:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
+        # Persist both the create-if-absent manifest link and temporary-name
+        # cleanup before reporting that a fresh run is safe to resume.  This is
+        # required even for a concurrent loser: it may observe the winner's
+        # link before the winner reaches its own durability barrier.
+        _fsync_directory(self.manifest_path.parent)
         return self.verify(hashes)
 
 

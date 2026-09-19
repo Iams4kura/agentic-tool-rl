@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import errno
 import hashlib
+import os
+import stat
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -241,6 +244,28 @@ def test_resume_guard_refuses_unattributed_existing_trace(tmp_path: Path) -> Non
         ResumeGuard(tmp_path / "missing-guard.json").authorize(
             _hashes(), trace_paths=[trace]
         )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="directory fsync is POSIX-only")
+def test_resume_guard_surfaces_directory_durability_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    guard = ResumeGuard(tmp_path / "run-integrity.json")
+    real_fsync = os.fsync
+
+    def fail_directory_fsync(file_descriptor: int) -> None:
+        if stat.S_ISDIR(os.fstat(file_descriptor).st_mode):
+            raise OSError(errno.EIO, "injected directory fsync failure")
+        real_fsync(file_descriptor)
+
+    monkeypatch.setattr(os, "fsync", fail_directory_fsync)
+
+    with pytest.raises(OSError, match="injected directory fsync failure"):
+        guard.authorize(_hashes())
+
+    # The hard link may already exist, but callers must not be told that its
+    # directory entry is durable when the durability barrier itself failed.
+    assert guard.verify(_hashes()) == canonical_run_signature(_hashes())
 
 
 def test_case_id_manifest_requires_exact_expected_set() -> None:
