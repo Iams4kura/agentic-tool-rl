@@ -272,6 +272,15 @@ def _entity_aliases(
     return {value: f"<entity:{index}>" for index, value in enumerate(unique)}
 
 
+def _replace_entity_ids(value: str, aliases: Mapping[str, str]) -> str:
+    if not aliases:
+        return value
+    pattern = re.compile(
+        "|".join(re.escape(identity) for identity in sorted(aliases, key=len, reverse=True))
+    )
+    return pattern.sub(lambda match: aliases[match.group(0)], value)
+
+
 def _sanitize(value: Any, aliases: Mapping[str, str]) -> Any:
     if isinstance(value, Mapping):
         return {
@@ -282,10 +291,7 @@ def _sanitize(value: Any, aliases: Mapping[str, str]) -> Any:
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return [_sanitize(item, aliases) for item in value]
     if isinstance(value, str):
-        result = value
-        for identity, alias in sorted(aliases.items(), key=lambda item: len(item[0]), reverse=True):
-            result = result.replace(identity, alias)
-        return result
+        return _replace_entity_ids(value, aliases)
     return value
 
 
