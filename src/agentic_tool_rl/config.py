@@ -7,11 +7,24 @@ from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
 import yaml  # type: ignore[import-untyped]
-from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PositiveFloat,
+    PositiveInt,
+    field_validator,
+    model_validator,
+)
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        allow_inf_nan=False,
+        strict=True,
+    )
 
 
 class BenchmarkConfig(StrictModel):
@@ -122,6 +135,11 @@ class AblationConfig(StrictModel):
     canonical_comparison: CanonicalComparisonConfig
     variants: tuple[AblationVariant, ...]
 
+    @field_validator("seeds", "variants", mode="before")
+    @classmethod
+    def accept_yaml_sequences(cls, value: Any) -> Any:
+        return tuple(value) if isinstance(value, list) else value
+
     @model_validator(mode="after")
     def validate_matrix(self) -> AblationConfig:
         if len(self.seeds) != 5 or len(set(self.seeds)) != 5:
@@ -167,6 +185,11 @@ class LoRAConfig(StrictModel):
     alpha: PositiveInt = 32
     dropout: float = Field(default=0.05, ge=0.0, lt=1.0)
     target_modules: tuple[str, ...]
+
+    @field_validator("target_modules", mode="before")
+    @classmethod
+    def accept_yaml_sequence(cls, value: Any) -> Any:
+        return tuple(value) if isinstance(value, list) else value
 
     @model_validator(mode="after")
     def validate_targets(self) -> LoRAConfig:
