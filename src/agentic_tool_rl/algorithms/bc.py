@@ -111,6 +111,8 @@ class BehaviorCloningTrainer:
                 grad_norm = nn.utils.clip_grad_norm_(
                     self.model.parameters(), self.config.max_grad_norm
                 )
+                if not bool(torch.isfinite(grad_norm)):
+                    raise FloatingPointError("BC gradient norm is non-finite")
                 self.optimizer.step()
                 final_loss = float(loss.detach())
                 final_entropy = float(entropy.detach().mean())
@@ -161,6 +163,8 @@ class BehaviorCloningTrainer:
                 grad_norm = nn.utils.clip_grad_norm_(
                     self.model.parameters(), self.config.max_grad_norm
                 )
+                if not bool(torch.isfinite(grad_norm)):
+                    raise FloatingPointError("BC gradient norm is non-finite")
                 self.optimizer.step()
                 final_loss = float(loss.detach())
                 final_entropy = float(entropy.detach().mean())
