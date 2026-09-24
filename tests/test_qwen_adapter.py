@@ -88,6 +88,31 @@ def test_fake_qwen_runtime_exercises_full_policy_contract() -> None:
     assert output.to_dict()["value"] == pytest.approx(0.7)
 
 
+@pytest.mark.parametrize("action_index", [True, 0.0, "0", None])
+def test_policy_output_rejects_non_integer_action_indices(action_index: object) -> None:
+    with pytest.raises(BackendContractError, match="action_index must be an integer"):
+        PolicyOutput(
+            action_index=action_index,  # type: ignore[arg-type]
+            tool_call={"tool_name": "inspect", "arguments": {}},
+            log_prob=-0.1,
+            value=0.2,
+        )
+
+
+@pytest.mark.parametrize("action_index", [0, 2])
+def test_policy_output_accepts_non_negative_integer_action_indices(
+    action_index: int,
+) -> None:
+    output = PolicyOutput(
+        action_index=action_index,
+        tool_call={"tool_name": "inspect", "arguments": {}},
+        log_prob=-0.1,
+        value=0.2,
+    )
+
+    assert output.action_index == action_index
+
+
 def test_qwen_prompt_contains_only_public_observation_and_candidate_dtos() -> None:
     policy_input = _policy_input(base_seed=1602)
     adapter = QwenAdapter(

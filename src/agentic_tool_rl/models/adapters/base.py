@@ -70,6 +70,8 @@ class PolicyOutput:
     raw_output: str | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.action_index, int) or isinstance(self.action_index, bool):
+            raise BackendContractError("action_index must be an integer")
         if self.action_index < 0:
             raise BackendContractError("action_index must be non-negative")
         if not isfinite(self.log_prob):
