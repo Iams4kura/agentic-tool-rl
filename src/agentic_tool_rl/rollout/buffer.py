@@ -27,9 +27,14 @@ class RolloutBuffer:
         return tuple(step for trajectory in self.trajectories for step in trajectory.steps)
 
     def add(self, record: StepRecord) -> None:
-        trajectory = self._trajectories.setdefault(
-            record.trajectory_id, Trajectory(record.trajectory_id)
-        )
+        """Append one step without registering a trajectory if validation fails."""
+
+        trajectory = self._trajectories.get(record.trajectory_id)
+        if trajectory is None:
+            trajectory = Trajectory(record.trajectory_id)
+            trajectory.append(record)
+            self._trajectories[record.trajectory_id] = trajectory
+            return
         trajectory.append(record)
 
     def add_contract(
