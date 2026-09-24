@@ -118,9 +118,9 @@ def cluster_bootstrap(
         raise ValueError("confidence must be between zero and one")
     grouped: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
     for trace in traces:
-        case_id = str(trace.get("case_id", ""))
-        if not case_id:
-            raise ValueError("every trace must have a non-empty case_id")
+        case_id = trace.get("case_id")
+        if not isinstance(case_id, str) or not case_id:
+            raise ValueError("every trace must have a non-empty string case_id")
         grouped[case_id].append(trace)
     if not grouped:
         raise ValueError("at least one trace is required")

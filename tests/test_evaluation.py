@@ -120,6 +120,25 @@ def test_metrics_reject_missing_latency_evidence() -> None:
         compute_metrics([trace])
 
 
+@pytest.mark.parametrize("value", [None, 0, True, []])
+@pytest.mark.parametrize("field", ["case_id", "family"])
+def test_metrics_reject_non_string_trace_identifiers(field: str, value: object) -> None:
+    trace = _traces()[0]
+    trace[field] = value
+
+    with pytest.raises(TraceSchemaError, match=field):
+        compute_metrics([trace])
+
+
+@pytest.mark.parametrize("case_id", [None, 0, True, []])
+def test_cluster_bootstrap_rejects_non_string_case_ids(case_id: object) -> None:
+    trace = _traces()[0]
+    trace["case_id"] = case_id
+
+    with pytest.raises(ValueError, match="case_id"):
+        cluster_bootstrap([trace], timeout_s=30.0, samples=2)
+
+
 def test_metrics_reject_step_count_that_disagrees_with_step_records() -> None:
     trace = {**_traces()[0], "step_count": 200}
 
