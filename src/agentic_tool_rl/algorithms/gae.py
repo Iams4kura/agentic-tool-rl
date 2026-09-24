@@ -25,10 +25,15 @@ def compute_gae(
     shifted only inside the same trajectory and terminal/truncated tails use
     zero bootstrap.  Supplying ``next_values`` allows a caller to bootstrap a
     truncated tail without ever borrowing the following episode's value.
+
+    ``rewards`` must use a floating dtype, which also determines the output
+    dtype. Integer storage would silently truncate values and advantages.
     """
 
     if not 0 <= gamma <= 1 or not 0 <= gae_lambda <= 1:
         raise ValueError("gamma and gae_lambda must lie in [0, 1]")
+    if not rewards.is_floating_point():
+        raise ValueError("rewards must use a floating dtype")
     rewards = rewards.flatten()
     values = values.flatten().to(device=rewards.device, dtype=rewards.dtype)
     dones = dones.flatten().to(device=rewards.device, dtype=torch.bool)
