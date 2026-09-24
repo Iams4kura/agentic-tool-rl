@@ -106,6 +106,14 @@ def _write_bytes_atomic(destination: Path, payload: bytes) -> Path:
     return destination
 
 
+def write_text_atomic(path: str | Path, content: str) -> Path:
+    """Write UTF-8 text, fsync it, and atomically replace the destination."""
+
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    return _write_bytes_atomic(destination, content.encode("utf-8"))
+
+
 def write_json_atomic(path: str | Path, value: Mapping[str, Any]) -> Path:
     """Write canonical, fsync'd JSON and atomically replace the destination."""
 

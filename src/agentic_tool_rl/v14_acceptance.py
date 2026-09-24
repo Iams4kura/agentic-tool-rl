@@ -42,6 +42,17 @@ def run_v14_development_acceptance(
         test_groups=test_groups,
         base_seed=base_seed,
     )
+    write_json_atomic(
+        output / "verification.json",
+        {
+            "schema_version": "benchmark-v1.4-development-verification-v1",
+            "passed": False,
+            "status": "publication-in-progress",
+            "canonical": False,
+            "canonical_final_executed": False,
+            "base_seed": base_seed,
+        },
+    )
     manifest_path = write_benchmark_v14(output, splits, base_seed=base_seed)
     with tempfile.TemporaryDirectory(prefix="agentic-tool-rl-v14-replay-") as temporary:
         replay_root = Path(temporary)

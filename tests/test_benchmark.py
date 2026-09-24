@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -155,6 +156,26 @@ def test_generator_is_deterministic_down_to_jsonl_bytes(tmp_path: Path) -> None:
     assert load_tasks_jsonl(first_path) == first
 
 
+def test_task_writer_removes_temporary_file_after_replace_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "tasks.jsonl"
+    original = b'{"value":"original"}\n'
+    destination.write_bytes(original)
+    tasks = generate_tasks(Split.TEST, 1, base_seed=701)
+
+    def fail_replace(*_args: object) -> None:
+        raise OSError("injected replace failure")
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="injected replace failure"):
+        save_tasks_jsonl(tasks, destination)
+
+    assert destination.read_bytes() == original
+    assert list(tmp_path.iterdir()) == [destination]
+
+
 def test_arbitrary_smoke_size_and_split_isolation() -> None:
     splits = generate_all_splits(train_size=7, dev_size=13, test_size=32, base_seed=17)
 
@@ -233,6 +254,25 @@ def test_write_benchmark_preserves_existing_bundle_when_late_oracle_fails(
     replacement[Split.TEST] = replacement_test
 
     with pytest.raises(ValueError, match="unsolvable generated task"):
+        write_benchmark(tmp_path, replacement, base_seed=702)
+
+    assert {name: (tmp_path / name).read_bytes() for name in artifact_names} == original_bytes
+
+
+def test_write_benchmark_preserves_existing_bundle_when_splits_overlap(
+    tmp_path: Path,
+) -> None:
+    original = generate_all_splits(train_size=1, dev_size=1, test_size=1, base_seed=701)
+    write_benchmark(tmp_path, original, base_seed=701)
+    artifact_names = ("train.jsonl", "dev.jsonl", "test.jsonl", "manifest.json")
+    original_bytes = {name: (tmp_path / name).read_bytes() for name in artifact_names}
+
+    replacement = generate_all_splits(train_size=1, dev_size=1, test_size=1, base_seed=702)
+    replacement[Split.DEV][0] = replacement[Split.TRAIN][0].model_copy(
+        update={"split": Split.DEV}
+    )
+
+    with pytest.raises(ValueError, match="cross-split leakage"):
         write_benchmark(tmp_path, replacement, base_seed=702)
 
     assert {name: (tmp_path / name).read_bytes() for name in artifact_names} == original_bytes
