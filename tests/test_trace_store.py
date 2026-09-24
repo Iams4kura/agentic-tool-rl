@@ -324,6 +324,22 @@ def test_open_rejects_dangling_final_symlink_without_creating_target(
     assert not target.exists()
 
 
+def test_open_without_o_nofollow_preserves_symlink_protection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delattr(trace_store_module.os, "O_NOFOLLOW", raising=False)
+    record = _record("portable")
+
+    store = TraceStore(tmp_path / "regular.jsonl")
+    assert store.append(record)
+
+    path = tmp_path / "simulated-link.jsonl"
+    monkeypatch.setattr(Path, "is_symlink", lambda self: self == path)
+    with pytest.raises(ValueError, match="must not be a symbolic link"):
+        TraceStore(path)
+    assert not path.exists()
+
+
 def test_append_rejects_final_symlink_installed_after_open(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
