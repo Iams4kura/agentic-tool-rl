@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 
+import pytest
 import torch
 
 from agentic_tool_rl.models import (
@@ -56,3 +57,36 @@ def test_progress_estimator_supervised_training_and_freeze() -> None:
 def test_progress_auroc_reports_undefined_single_class() -> None:
     metrics = compute_progress_metrics(torch.tensor([0.1, 0.3]), torch.zeros(2))
     assert math.isnan(metrics.auroc)
+
+
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf"), float("-inf")])
+def test_progress_metrics_reject_non_finite_probabilities(invalid: float) -> None:
+    with pytest.raises(ValueError, match="probabilities must be finite"):
+        compute_progress_metrics(
+            torch.tensor([0.2, invalid]),
+            torch.tensor([0.0, 1.0]),
+        )
+
+
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf"), float("-inf")])
+def test_progress_fit_rejects_non_finite_features_without_mutation(
+    invalid: float,
+) -> None:
+    torch.manual_seed(31)
+    model = ProgressEstimator(input_dim=2, hidden_dim=4).freeze()
+    parameters_before = [parameter.detach().clone() for parameter in model.parameters()]
+
+    with pytest.raises(ValueError, match="features must be finite"):
+        model.fit(
+            torch.tensor([[0.0, 1.0], [1.0, invalid]]),
+            torch.tensor([0.0, 1.0]),
+            epochs=1,
+            batch_size=2,
+        )
+
+    assert model.frozen
+    assert not model.training
+    assert all(
+        torch.equal(before, after.detach())
+        for before, after in zip(parameters_before, model.parameters(), strict=True)
+    )

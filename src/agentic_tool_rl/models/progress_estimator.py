@@ -63,6 +63,8 @@ def compute_progress_metrics(
     labels = labels.detach().flatten().to(dtype=torch.float64, device="cpu")
     if probabilities.numel() == 0 or probabilities.shape != labels.shape:
         raise ValueError("probabilities and labels must be non-empty vectors of equal size")
+    if not bool(torch.isfinite(probabilities).all()):
+        raise ValueError("probabilities must be finite")
     if bool(((probabilities < 0) | (probabilities > 1)).any()):
         raise ValueError("probabilities must lie in [0, 1]")
     if bool(((labels != 0) & (labels != 1)).any()):
@@ -150,6 +152,8 @@ class ProgressEstimator(nn.Module):
         labels = labels.flatten().to(device=features.device, dtype=features.dtype)
         if labels.shape[0] != features.shape[0] or features.shape[0] == 0:
             raise ValueError("features and labels must be non-empty and aligned")
+        if not bool(torch.isfinite(features).all()):
+            raise ValueError("features must be finite")
         if bool(((labels != 0) & (labels != 1)).any()):
             raise ValueError("labels must be binary")
 
