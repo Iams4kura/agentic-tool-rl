@@ -77,7 +77,7 @@ def test_workflows_enforce_locked_read_only_toolchain() -> None:
 
 def test_make_ci_contains_distribution_gate_but_not_optional_layers() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    ci_recipe = makefile.split("ci: sync", maxsplit=1)[1].split("benchmark:", maxsplit=1)[0]
+    ci_recipe = makefile.split("\nci:", maxsplit=1)[1].split("benchmark:", maxsplit=1)[0]
     assert "$(MAKE) lock-check" in ci_recipe
     assert "$(MAKE) package-check" in ci_recipe
     assert "qwen" not in ci_recipe.casefold()

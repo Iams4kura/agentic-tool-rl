@@ -73,8 +73,9 @@ qwen-test:
 
 qwen-check: qwen-test qwen-dry-run
 
-ci: sync
+ci:
 	$(MAKE) lock-check
+	$(MAKE) sync
 	$(MAKE) check
 	$(MAKE) verify-smoke
 	$(MAKE) package-check
