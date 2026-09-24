@@ -132,6 +132,53 @@ def test_consistent_entity_renaming_preserves_policy_input_bytes() -> None:
     assert renamed.canonical_bytes() == baseline.canonical_bytes()
 
 
+def test_entity_aliases_are_not_replaced_a_second_time() -> None:
+    def build(entity_ids: tuple[str, str]) -> PolicyInput:
+        first, second = entity_ids
+        observation = {
+            "task_id": "case",
+            "step_index": 0,
+            "max_steps": 1,
+            "remaining_steps": 1,
+            "user_goal": f"update {first} but inspect {second}",
+            "visible_state": {"entity_id": first},
+            "available_entities": [first, second],
+            "available_tools": ["tool"],
+            "message": "",
+            "done": False,
+        }
+        candidates = [
+            {"tool_name": "tool", "arguments": {"entity_id": entity_id}}
+            for entity_id in entity_ids
+        ]
+        schemas = [
+            {
+                "name": "tool",
+                "description": "",
+                "required_arguments": {"entity_id": "string"},
+            }
+        ]
+        return PolicyInput.from_decision(
+            observation,
+            candidates,
+            [True, True],
+            schemas,
+        )
+
+    ordinary = build(("customer-entity-aaaa", "other-entity"))
+    alias_shaped_identity = build(("customer-entity-aaaa", "<entity:0>"))
+
+    assert alias_shaped_identity.observation.available_entities == (
+        "<entity:0>",
+        "<entity:1>",
+    )
+    assert [
+        candidate.tool_call.arguments["entity_id"]
+        for candidate in alias_shaped_identity.candidates
+    ] == ["<entity:0>", "<entity:1>"]
+    assert alias_shaped_identity.canonical_bytes() == ordinary.canonical_bytes()
+
+
 def test_policy_input_rejects_candidate_without_corresponding_schema() -> None:
     task, observation, candidates, action_mask = _initial_decision()
 
