@@ -284,6 +284,18 @@ def test_rollout_buffer_preserves_tool_steps_and_pads_candidates() -> None:
     assert trace["reward_components"]["task"] == 0.1
 
 
+@pytest.mark.parametrize(
+    "component", ["task_reward", "progress_reward", "step_reward", "invalid_reward"]
+)
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_rollout_record_rejects_non_finite_reward_components(
+    component: str, value: float
+) -> None:
+    record = _record("bad-reward", 0, candidate_count=1, reward=0.0, done=True)
+    with pytest.raises(ValueError, match="reward components must be finite"):
+        replace(record, **{component: value})
+
+
 def test_rollout_buffer_adapts_portable_contract_record() -> None:
     from agentic_tool_rl.contracts import InvalidActionKind, ToolCall
     from agentic_tool_rl.contracts import StepRecord as ContractRecord
