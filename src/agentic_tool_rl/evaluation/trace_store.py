@@ -83,7 +83,20 @@ class TraceStore:
 
     @staticmethod
     def _open_no_follow(path: str, flags: int) -> int:
-        return os.open(path, flags | os.O_NOFOLLOW, 0o666)
+        no_follow = getattr(os, "O_NOFOLLOW", None)
+        if no_follow is not None:
+            return os.open(path, flags | no_follow, 0o666)
+
+        # Windows has no O_NOFOLLOW. Reject an existing link before opening,
+        # then omit O_CREAT on the first attempt so a dangling link cannot
+        # create its target. O_EXCL closes the missing-path creation race; the
+        # caller's lstat/fstat identity check protects the existing-file race.
+        if Path(path).is_symlink():
+            raise OSError(errno.ELOOP, "symbolic link is not allowed", path)
+        try:
+            return os.open(path, flags & ~os.O_CREAT, 0o666)
+        except FileNotFoundError:
+            return os.open(path, flags | os.O_EXCL, 0o666)
 
     def _open_handle(self) -> BinaryIO:
         try:
