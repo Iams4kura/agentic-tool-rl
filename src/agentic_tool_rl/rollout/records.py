@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, is_dataclass
+from math import isfinite
 from typing import Any
 
 import torch
@@ -87,6 +88,14 @@ class StepRecord:
         scalar_values = (self.log_prob, self.value, self.reward)
         if not all(torch.isfinite(torch.tensor(item)) for item in scalar_values):
             raise ValueError("log_prob, value and reward must be finite")
+        reward_components = (
+            self.task_reward,
+            self.progress_reward,
+            self.step_reward,
+            self.invalid_reward,
+        )
+        if not all(isfinite(component) for component in reward_components):
+            raise ValueError("reward components must be finite")
         if self.state_features is not None and self.state_features.ndim != 1:
             raise ValueError("state_features must have shape [S]")
         if self.action_features is not None:
