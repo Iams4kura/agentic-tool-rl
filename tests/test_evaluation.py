@@ -120,6 +120,37 @@ def test_metrics_reject_missing_latency_evidence() -> None:
         compute_metrics([trace])
 
 
+@pytest.mark.parametrize("source", ("latency_trace", "step_records"))
+def test_metrics_reject_overflowed_aggregate_latency(source: str) -> None:
+    trace = _traces()[0]
+    trace.pop("simulated_latency_s")
+    if source == "latency_trace":
+        trace["latency_trace"] = [1e308, 1e308]
+    else:
+        trace["steps"] = [
+            {"executed_valid": True, "tool_latency_s": 1e308},
+            {"executed_valid": True, "tool_latency_s": 1e308},
+        ]
+
+    with pytest.raises(TraceSchemaError, match=r"total latency.*finite"):
+        compute_metrics([trace])
+
+
+@pytest.mark.parametrize("source", ("latency_trace", "step_records"))
+def test_metrics_accept_finite_aggregate_latency(source: str) -> None:
+    trace = _traces()[0]
+    trace.pop("simulated_latency_s")
+    if source == "latency_trace":
+        trace["latency_trace"] = [2.0, 3.0]
+    else:
+        trace["steps"] = [
+            {"executed_valid": True, "tool_latency_s": 2.0},
+            {"executed_valid": True, "tool_latency_s": 3.0},
+        ]
+
+    assert compute_metrics([trace]).successful_conditional_simulated_service_time_s == 5.0
+
+
 @pytest.mark.parametrize("value", [None, 0, True, []])
 @pytest.mark.parametrize("field", ["case_id", "family"])
 def test_metrics_reject_non_string_trace_identifiers(field: str, value: object) -> None:
