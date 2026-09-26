@@ -145,9 +145,12 @@ def _latency(trace: Mapping[str, Any], records: Sequence[Mapping[str, Any]]) -> 
             latency_trace, (str, bytes, bytearray)
         ):
             raise TraceSchemaError("latency_trace must be a sequence")
-        return sum(
-            _as_non_negative_float(item, field_name="latency_trace item")
-            for item in latency_trace
+        return _as_non_negative_float(
+            sum(
+                _as_non_negative_float(item, field_name="latency_trace item")
+                for item in latency_trace
+            ),
+            field_name="total latency",
         )
 
     values: list[float] = []
@@ -157,7 +160,7 @@ def _latency(trace: Mapping[str, Any], records: Sequence[Mapping[str, Any]]) -> 
                 values.append(_as_non_negative_float(record[key], field_name=key))
                 break
     if values:
-        return sum(values)
+        return _as_non_negative_float(sum(values), field_name="total latency")
     raise TraceSchemaError(
         "trace must contain simulated_latency_s, latency_s, latency_trace, "
         "or per-step latency"
