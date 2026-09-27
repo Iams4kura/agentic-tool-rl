@@ -120,6 +120,18 @@ def test_metrics_reject_missing_latency_evidence() -> None:
         compute_metrics([trace])
 
 
+def test_successful_service_time_mean_remains_finite_for_large_latencies() -> None:
+    traces = [
+        {**_traces()[0], "case_id": f"calendar-{index}", "simulated_latency_s": 1e308}
+        for index in range(2)
+    ]
+
+    metrics = compute_metrics(traces)
+
+    assert metrics.successful_conditional_simulated_service_time_s == 1e308
+    assert metrics.timeout_penalized_simulated_cost_s == 30.0
+
+
 @pytest.mark.parametrize("value", [None, 0, True, []])
 @pytest.mark.parametrize("field", ["case_id", "family"])
 def test_metrics_reject_non_string_trace_identifiers(field: str, value: object) -> None:

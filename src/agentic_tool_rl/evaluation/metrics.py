@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
-from math import isfinite
+from math import fsum, isfinite
 from pathlib import Path
 from statistics import fmean
 from typing import Any
@@ -164,6 +164,14 @@ def _latency(trace: Mapping[str, Any], records: Sequence[Mapping[str, Any]]) -> 
     )
 
 
+def _service_time_mean(values: Sequence[float]) -> float:
+    try:
+        return fmean(values)
+    except OverflowError:
+        # The mean can be finite even when summing finite service times overflows.
+        return fsum(value / len(values) for value in values)
+
+
 def _side_effect(trace: Mapping[str, Any]) -> bool:
     for key in ("forbidden_side_effect", "has_forbidden_side_effect"):
         if key in trace:
@@ -309,7 +317,7 @@ def compute_metrics(
         steps_efficiency=fmean(efficiencies),
         mean_steps=fmean(step_counts),
         successful_conditional_simulated_service_time_s=(
-            fmean(successful_service_times) if successful_service_times else None
+            _service_time_mean(successful_service_times) if successful_service_times else None
         ),
         timeout_penalized_simulated_cost_s=fmean(timeout_penalized_costs),
         timeout_s=timeout,
