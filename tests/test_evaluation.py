@@ -113,6 +113,17 @@ def test_policy_metrics_are_derived_only_from_case_traces() -> None:
     }.isdisjoint(metrics.to_dict())
 
 
+def test_timeout_penalized_cost_mean_handles_finite_sum_overflow() -> None:
+    traces = _traces()
+    for trace in traces:
+        trace["success"] = False
+
+    metrics = compute_metrics(traces, timeout_s=1e308)
+
+    assert metrics.timeout_penalized_simulated_cost_s == 1e308
+    assert metrics.successful_conditional_simulated_service_time_s is None
+
+
 def test_metrics_reject_missing_latency_evidence() -> None:
     trace = _traces()[0]
     trace.pop("simulated_latency_s")
