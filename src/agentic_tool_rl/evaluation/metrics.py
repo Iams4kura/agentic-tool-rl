@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
-from math import isfinite
+from math import fsum, isfinite
 from pathlib import Path
 from statistics import fmean
 from typing import Any
@@ -296,6 +296,13 @@ def compute_metrics(
         name: {"cases": len(values), "successful_cases": sum(values), "tsr": fmean(values)}
         for name, values in sorted(families.items())
     }
+    try:
+        mean_timeout_penalized_cost = fmean(timeout_penalized_costs)
+    except OverflowError:
+        mean_timeout_penalized_cost = fsum(
+            cost / len(timeout_penalized_costs) for cost in timeout_penalized_costs
+        )
+
     metric = EvaluationMetrics(
         schema_version="3.0",
         cases=len(rows),
@@ -311,7 +318,7 @@ def compute_metrics(
         successful_conditional_simulated_service_time_s=(
             fmean(successful_service_times) if successful_service_times else None
         ),
-        timeout_penalized_simulated_cost_s=fmean(timeout_penalized_costs),
+        timeout_penalized_simulated_cost_s=mean_timeout_penalized_cost,
         timeout_s=timeout,
         executed_actions=len(executed_valid),
         families=family_summary,
