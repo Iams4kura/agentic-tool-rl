@@ -156,6 +156,16 @@ def test_metrics_reject_conflicting_integer_step_counts(field: str) -> None:
         compute_metrics([trace])
 
 
+@pytest.mark.parametrize("field", ("steps", "records"))
+def test_metrics_reject_large_integer_step_count_mismatch(field: str) -> None:
+    trace = {**_traces()[0], "step_count": 2**53 + 1, field: 2**53}
+    if field == "records":
+        trace.pop("steps")
+
+    with pytest.raises(TraceSchemaError, match=r"step_count.*step evidence"):
+        compute_metrics([trace])
+
+
 def test_metrics_uses_integer_records_alias_as_step_count() -> None:
     trace = _traces()[0]
     trace.pop("steps")

@@ -90,6 +90,17 @@ def _as_non_negative_float(value: Any, *, field_name: str) -> float:
     return result
 
 
+def _as_non_negative_int(value: Any, *, field_name: str) -> int:
+    if isinstance(value, int) and not isinstance(value, bool):
+        if value < 0:
+            raise TraceSchemaError(f"{field_name} must be finite and non-negative")
+        return value
+    count = _as_non_negative_float(value, field_name=field_name)
+    if not count.is_integer():
+        raise TraceSchemaError(f"{field_name} must be an integer")
+    return int(count)
+
+
 def _step_records(trace: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     raw = trace.get("steps", trace.get("records", []))
     if isinstance(raw, int):
@@ -112,15 +123,12 @@ def _step_count(trace: Mapping[str, Any], records: Sequence[Mapping[str, Any]]) 
         explicit = raw_evidence
     if explicit is None:
         explicit = len(records)
-    count = _as_non_negative_float(explicit, field_name="step_count")
-    if not count.is_integer():
-        raise TraceSchemaError("step_count must be an integer")
-    resolved = int(count)
+    resolved = _as_non_negative_int(explicit, field_name="step_count")
     if isinstance(raw_evidence, int):
-        evidence_count = _as_non_negative_float(raw_evidence, field_name="step evidence")
-        if resolved != int(evidence_count):
+        evidence_count = _as_non_negative_int(raw_evidence, field_name="step evidence")
+        if resolved != evidence_count:
             raise TraceSchemaError(
-                f"step_count {resolved} does not match {int(evidence_count)} "
+                f"step_count {resolved} does not match {evidence_count} "
                 f"from {raw_field} step evidence"
             )
     elif (
