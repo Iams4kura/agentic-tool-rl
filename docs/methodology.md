@@ -19,7 +19,9 @@ canonical 可以为 true 而 hypothesis_passed 为 false；后者是应保留的
 
 ## 2. 环境与入口
 
-默认支持 macOS/Linux、Python 3.11，依赖由 uv.lock 固定。
+完整主 CI 以 Linux、CPython 3.11.15 运行；macOS 验证也使用 3.11.15。
+另有 Python 3.12 和 3.13 的核心契约兼容检查，但不运行完整实验闭环。
+项目声明的解释器范围是 `>=3.11,<3.14`，依赖由 `uv.lock` 固定。
 
 ~~~bash
 make sync
