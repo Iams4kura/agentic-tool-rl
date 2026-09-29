@@ -19,6 +19,14 @@
 > [v1.3 审计](docs/results/posthoc-v1.3-public-ready.md)与
 > [v1.4 development protocol](docs/protocol/benchmark-v1.4-development.md)。
 
+## 当前版本与结果状态
+
+| 项目 | 当前状态 | 证据入口 |
+|---|---|---|
+| 软件版本 | `0.2.0.dev0` 开发中；最近发布的版本是 `v0.1.0` | [项目元数据](pyproject.toml)、[Release 验证说明](#canonical-统计报告) |
+| v1.3 实验 | canonical final 已完成；下文的六变体、五种子结果属于这次冻结实验 | [结果报告](docs/results/canonical-v1.3.md)、[事后审计](docs/results/posthoc-v1.3-public-ready.md) |
+| v1.4 实验 | 已有反事实 benchmark 的开发验收入口；尚无 canonical final 或可发布的学习效果数字 | [开发协议](docs/protocol/benchmark-v1.4-development.md)、[验收入口](#v14-development-acceptance) |
+
 ## 设计与证据
 
 | 能力 | 当前实现 | 可验证证据 |
