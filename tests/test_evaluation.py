@@ -120,6 +120,14 @@ def test_metrics_reject_missing_latency_evidence() -> None:
         compute_metrics([trace])
 
 
+@pytest.mark.parametrize("field", ("step_count", "optimal_steps", "simulated_latency_s"))
+def test_metrics_reject_integer_too_large_for_float(field: str) -> None:
+    trace = {**_traces()[0], field: 10**400}
+
+    with pytest.raises(TraceSchemaError, match=field):
+        compute_metrics([trace])
+
+
 @pytest.mark.parametrize("value", [None, 0, True, []])
 @pytest.mark.parametrize("field", ["case_id", "family"])
 def test_metrics_reject_non_string_trace_identifiers(field: str, value: object) -> None:
