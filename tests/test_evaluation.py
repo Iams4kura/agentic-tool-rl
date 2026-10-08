@@ -22,6 +22,7 @@ from agentic_tool_rl.evaluation import (
     write_json_atomic,
 )
 from agentic_tool_rl.evaluation.io import canonical_json
+from agentic_tool_rl.evaluation.recompute import diff_metrics
 from agentic_tool_rl.experiment import _claim_metric_projection
 
 
@@ -250,6 +251,26 @@ def test_precomputed_metrics_can_be_compared_without_reloading_traces() -> None:
     assert compare_metrics(metrics, {}).matches is False
     with pytest.raises(ValueError, match="tolerance"):
         compare_metrics(metrics, tolerance=-1.0)
+
+
+@pytest.mark.parametrize("tolerance", [float("nan"), float("inf"), -float("inf")])
+def test_metric_comparison_rejects_non_finite_tolerance(tolerance: float) -> None:
+    metrics = compute_metrics(_traces())
+    published = {**metrics.to_dict(), "tsr": 0.99}
+
+    with pytest.raises(ValueError, match="tolerance"):
+        diff_metrics(published, metrics.to_dict(), tolerance=tolerance)
+    with pytest.raises(ValueError, match="tolerance"):
+        compare_metrics(metrics, published, tolerance=tolerance)
+    with pytest.raises(ValueError, match="tolerance"):
+        compare_metrics(metrics, tolerance=tolerance)
+
+
+@pytest.mark.parametrize("tolerance", [0.0, 1e-9, 0.25])
+def test_metric_comparison_preserves_finite_absolute_tolerance(tolerance: float) -> None:
+    assert diff_metrics({"tsr": 0.5}, {"tsr": 0.5}, tolerance=tolerance) == ()
+    differences = diff_metrics({"tsr": 0.5}, {"tsr": 0.625}, tolerance=tolerance)
+    assert bool(differences) is (tolerance < 0.125)
 
 
 def test_claim_projection_preserves_published_outcome_metrics() -> None:
