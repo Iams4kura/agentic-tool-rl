@@ -85,6 +85,8 @@ def _as_non_negative_float(value: Any, *, field_name: str) -> float:
         result = float(value)
     except (TypeError, ValueError) as exc:
         raise TraceSchemaError(f"{field_name} must be numeric, got {value!r}") from exc
+    except OverflowError as exc:
+        raise TraceSchemaError(f"{field_name} must be finite and non-negative") from exc
     if not isfinite(result) or result < 0:
         raise TraceSchemaError(f"{field_name} must be finite and non-negative")
     return result
