@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
-from math import isclose
+from math import isclose, isfinite
 from pathlib import Path
 from typing import Any
 
@@ -92,8 +92,8 @@ def diff_metrics(
     *,
     tolerance: float = 1e-9,
 ) -> tuple[MetricDifference, ...]:
-    if tolerance < 0:
-        raise ValueError("tolerance must be non-negative")
+    if not isfinite(tolerance) or tolerance < 0:
+        raise ValueError("tolerance must be finite and non-negative")
     output: list[MetricDifference] = []
     _diff(expected, actual, path="", tolerance=tolerance, output=output)
     return tuple(output)
@@ -112,8 +112,8 @@ def compare_metrics(
     JSONL file a second time.
     """
 
-    if tolerance < 0:
-        raise ValueError("tolerance must be non-negative")
+    if not isfinite(tolerance) or tolerance < 0:
+        raise ValueError("tolerance must be finite and non-negative")
     actual = metrics.to_dict()
     differences = (
         diff_metrics(published, actual, tolerance=tolerance)
