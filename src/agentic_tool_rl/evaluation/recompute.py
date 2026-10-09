@@ -18,7 +18,7 @@ class MetricDifference:
     path: str
     expected: Any
     actual: Any
-    absolute_difference: float | None = None
+    absolute_difference: int | float | None = None
 
 
 @dataclass(frozen=True)
@@ -76,6 +76,12 @@ def _diff(
         and not isinstance(actual, bool)
     )
     if numeric:
+        # Preserve integer evidence before float conversion can round it or overflow.
+        if isinstance(expected, int) and isinstance(actual, int):
+            integer_difference = abs(expected - actual)
+            if integer_difference > tolerance:
+                output.append(MetricDifference(path, expected, actual, integer_difference))
+            return
         difference = abs(float(expected) - float(actual))
         if not isclose(float(expected), float(actual), rel_tol=0.0, abs_tol=tolerance):
             output.append(MetricDifference(path, expected, actual, difference))
