@@ -7,7 +7,39 @@ import pytest
 
 from agentic_tool_rl.evaluation.io import canonical_json, write_json_atomic
 from agentic_tool_rl.evaluation.metrics import compute_metrics
-from agentic_tool_rl.evaluation.recompute import diff_metrics, recompute_metrics
+from agentic_tool_rl.evaluation.recompute import compare_metrics, diff_metrics, recompute_metrics
+
+
+@pytest.mark.parametrize("value", [2**53, 10**400])
+def test_integer_differences_preserve_precision_and_tolerance(value: int) -> None:
+    assert diff_metrics({"value": value}, {"value": value}) == ()
+    for expected, actual in ((value, value + 1), (value + 1, value)):
+        differences = diff_metrics(
+            {"nested": [{"value": expected}]}, {"nested": [{"value": actual}]}
+        )
+        assert len(differences) == 1
+        assert differences[0].path == "nested[0].value"
+        assert differences[0].expected == expected
+        assert differences[0].actual == actual
+        assert differences[0].absolute_difference == 1
+        assert diff_metrics({"value": expected}, {"value": actual}, tolerance=1.0) == ()
+
+
+def test_compare_reports_integer_seed_tampering() -> None:
+    metrics = compute_metrics(
+        [{
+            "case_id": "one", "family": "test", "success": True, "steps": 1,
+            "optimal_steps": 1, "simulated_latency_s": 1.0,
+        }],
+        bootstrap_seed=2**53,
+    )
+    published = metrics.to_dict()
+    published["bootstrap_seed"] = 2**53 + 1
+    result = compare_metrics(metrics, published)
+    assert not result.matches
+    assert len(result.differences) == 1
+    assert result.differences[0].path == "bootstrap_seed"
+    assert result.differences[0].absolute_difference == 1
 
 
 @pytest.mark.parametrize("boolean,number", [(True, 1), (True, 1.0), (False, 0), (False, 0.0)])
