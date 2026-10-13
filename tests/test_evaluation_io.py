@@ -8,6 +8,55 @@ from typing import Any
 import pytest
 
 import agentic_tool_rl.evaluation.io as evaluation_io
+from agentic_tool_rl.evaluation.recompute import recompute_metrics
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        '{"success":true,"success":false}',
+        '{"success":false,"success":true}',
+        '{"final_state":{"success":true,"success":false}}',
+        '{"steps":[{"accepted":true,"accepted":false}]}',
+        '{"success":true,"\\u0073uccess":false}',
+    ],
+)
+def test_read_jsonl_rejects_duplicate_object_keys(tmp_path: Path, row: str) -> None:
+    source = tmp_path / "traces.jsonl"
+    source.write_text('{}\n\n' + row + '\n', encoding="utf-8")
+
+    with pytest.raises(ValueError) as error:
+        evaluation_io.read_jsonl(source)
+
+    assert f"invalid JSONL at {source}:3:" in str(error.value)
+    assert "duplicate object key" in str(error.value)
+
+
+def test_read_jsonl_allows_repeated_keys_in_separate_objects(tmp_path: Path) -> None:
+    rows = [
+        {"success": True, "steps": [{"accepted": True}, {"accepted": False}]},
+        {"success": False, "final_state": {"success": True}},
+    ]
+    source = evaluation_io.write_jsonl_atomic(tmp_path / "traces.jsonl", rows)
+
+    assert evaluation_io.read_jsonl(source) == rows
+
+
+def test_recompute_rejects_ambiguous_trace_before_replacing_report(tmp_path: Path) -> None:
+    source = tmp_path / "traces.jsonl"
+    source.write_text(
+        '{"case_id":"one","family":"test","success":false,"success":true,'
+        '"steps":1,"optimal_steps":1,"simulated_latency_s":1.0}\n',
+        encoding="utf-8",
+    )
+    output = tmp_path / "report.json"
+    original = b'{"previous_report":true}\n'
+    output.write_bytes(original)
+
+    with pytest.raises(ValueError, match="duplicate object key 'success'"):
+        recompute_metrics(source, output_path=output)
+
+    assert output.read_bytes() == original
 
 
 def _write_json(path: Path) -> Path:
