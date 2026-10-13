@@ -26,7 +26,18 @@ def sha256_json(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate object key {key!r}")
+        result[key] = value
+    return result
+
+
 def read_jsonl(path: str | Path) -> list[dict[str, Any]]:
+    """Read object rows, rejecting ambiguous duplicate keys at any depth."""
+
     source = Path(path)
     rows: list[dict[str, Any]] = []
     with source.open("r", encoding="utf-8") as handle:
@@ -34,8 +45,8 @@ def read_jsonl(path: str | Path) -> list[dict[str, Any]]:
             if not line.strip():
                 continue
             try:
-                value = json.loads(line)
-            except json.JSONDecodeError as exc:
+                value = json.loads(line, object_pairs_hook=_unique_object)
+            except ValueError as exc:
                 raise ValueError(f"invalid JSONL at {source}:{line_number}: {exc}") from exc
             if not isinstance(value, dict):
                 raise ValueError(f"JSONL row at {source}:{line_number} must be an object")
