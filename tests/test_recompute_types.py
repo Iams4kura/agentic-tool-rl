@@ -64,3 +64,60 @@ def test_recompute_reports_boolean_tampering_in_published_metrics(tmp_path: Path
     for difference in report["differences"]:
         assert isinstance(difference["expected"], bool)
         assert type(difference["actual"]) in (int, float)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"tsr":0.0,"tsr":1.0}',
+        '{"tsr":1.0,"tsr":0.0}',
+        '{"nested":{"value":1,"value":2}}',
+        '{"nested":[{"value":1,"value":2}]}',
+        r'{"tsr":0.0,"\u0074sr":1.0}',
+    ],
+)
+def test_recompute_rejects_duplicate_published_keys_without_replacing_report(
+    tmp_path: Path, payload: str
+) -> None:
+    trace = {
+        "case_id": "one",
+        "family": "test",
+        "success": True,
+        "steps": 1,
+        "optimal_steps": 1,
+        "simulated_latency_s": 1.0,
+    }
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_text(canonical_json(trace) + "\n", encoding="utf-8")
+    metrics_path = tmp_path / "metrics.json"
+    metrics_path.write_text(payload, encoding="utf-8")
+    report_path = tmp_path / "report.json"
+    previous_report = b"previous verified report\n"
+    report_path.write_bytes(previous_report)
+
+    with pytest.raises(ValueError, match=r"duplicate.*key") as error:
+        recompute_metrics(
+            trace_path, published_metrics_path=metrics_path, output_path=report_path
+        )
+
+    assert str(metrics_path) in str(error.value)
+    assert report_path.read_bytes() == previous_report
+    assert metrics_path.read_text(encoding="utf-8") == payload
+
+
+def test_published_keys_can_recur_in_separate_objects(tmp_path: Path) -> None:
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_text(
+        canonical_json({
+            "case_id": "one", "family": "test", "success": True,
+            "steps": 1, "optimal_steps": 1, "simulated_latency_s": 1.0,
+        }) + "\n",
+        encoding="utf-8",
+    )
+    metrics_path = tmp_path / "metrics.json"
+    metrics_path.write_text('{"nested":[{"value":1},{"value":2}]}', encoding="utf-8")
+
+    result = recompute_metrics(trace_path, published_metrics_path=metrics_path)
+
+    assert not result.matches
+    assert any(item.path == "nested" for item in result.differences)
