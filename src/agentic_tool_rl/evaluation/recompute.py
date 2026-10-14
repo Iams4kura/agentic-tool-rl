@@ -135,6 +135,15 @@ def _paths_alias(left: Path, right: Path) -> bool:
         return left.resolve() == right.resolve()
 
 
+def _published_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate published metrics key {key!r}")
+        result[key] = value
+    return result
+
+
 def recompute_metrics(
     trace_path: str | Path,
     *,
@@ -164,7 +173,10 @@ def recompute_metrics(
     published: dict[str, Any] | None = None
     if published_source is not None:
         with published_source.open("r", encoding="utf-8") as handle:
-            loaded = json.load(handle)
+            try:
+                loaded = json.load(handle, object_pairs_hook=_published_object)
+            except ValueError as exc:
+                raise ValueError(f"invalid published metrics at {published_source}: {exc}") from exc
         if not isinstance(loaded, dict):
             raise ValueError("published metrics must be a JSON object")
         published = loaded
